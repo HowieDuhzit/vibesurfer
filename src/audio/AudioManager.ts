@@ -11,6 +11,7 @@ export class AudioManager {
   private playbackStartContextTime = 0;
   private playbackOffset = 0;
   private playing = false;
+  private readonly endedListeners: Array<() => void> = [];
 
   public constructor() {
     this.audioContext = new AudioContext();
@@ -36,6 +37,10 @@ export class AudioManager {
 
   public getLoadedBuffer(): AudioBuffer | null {
     return this.audioBuffer;
+  }
+
+  public getDuration(): number {
+    return this.audioBuffer?.duration ?? 0;
   }
 
   public async loadAudioFile(file: File): Promise<void> {
@@ -69,6 +74,9 @@ export class AudioManager {
       this.playing = false;
       this.sourceNode = null;
       this.playbackOffset = 0;
+      for (let i = 0; i < this.endedListeners.length; i += 1) {
+        this.endedListeners[i]();
+      }
     };
   }
 
@@ -94,6 +102,10 @@ export class AudioManager {
 
   public isPlaying(): boolean {
     return this.playing;
+  }
+
+  public onEnded(listener: () => void): void {
+    this.endedListeners.push(listener);
   }
 
   private stopSourceOnly(): void {

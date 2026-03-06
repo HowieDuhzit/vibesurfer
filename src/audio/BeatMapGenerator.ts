@@ -28,11 +28,12 @@ export class BeatMapGenerator {
   private readonly frameSize = FFT_SIZE * 2;
   private readonly hopSize = FFT_SIZE / 4;
   private readonly silenceFloorDb = -45;
-  private readonly timingOffsetSeconds = 0.01;
+  private timingOffsetSeconds = 0.01;
   private readonly minNoteGapSeconds = 0.14;
 
   private readonly bpmMin = 80;
   private readonly bpmMax = 170;
+  private difficulty: "chill" | "normal" | "hyper" = "normal";
 
   public generateFromAudioBuffer(buffer: AudioBuffer): void {
     this.queue.length = 0;
@@ -168,6 +169,14 @@ export class BeatMapGenerator {
 
   public getPendingCount(): number {
     return this.queue.length;
+  }
+
+  public setTimingOffsetMs(ms: number): void {
+    this.timingOffsetSeconds = ms / 1000;
+  }
+
+  public setDifficulty(difficulty: "chill" | "normal" | "hyper"): void {
+    this.difficulty = difficulty;
   }
 
   private analyzeFrames(mono: Float32Array, sampleRate: number): {
@@ -444,7 +453,8 @@ export class BeatMapGenerator {
     }
 
     const beatPeriodSeconds = (periodFrames * this.hopSize) / sampleRate;
-    const targetNps = Math.max(1.8, Math.min(3.1, (1 / Math.max(0.2, beatPeriodSeconds)) * 1.35));
+    const difficultyMult = this.difficulty === "chill" ? 0.8 : this.difficulty === "hyper" ? 1.35 : 1;
+    const targetNps = Math.max(1.4, Math.min(4.2, (1 / Math.max(0.2, beatPeriodSeconds)) * 1.35 * difficultyMult));
     const targetCount = Math.floor(durationSeconds * targetNps);
 
     if (baseFrames.length >= targetCount) {

@@ -34,15 +34,69 @@
         background: rgba(2, 6, 23, 0.78);
         border-radius: 8px;
         backdrop-filter: blur(6px);
+        width: min(520px, calc(100vw - 24px));
       }
 
-      #stats {
+      #hud.compact {
+        width: auto;
+        max-width: 320px;
+      }
+
+      #hud.compact #perf,
+      #hud.compact #debug {
+        display: none;
+      }
+
+      #hud-row,
+      #stats,
+      #perf {
         display: flex;
         gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      #judgment {
+        position: fixed;
+        left: 50%;
+        top: 58%;
+        transform: translate(-50%, -50%);
+        z-index: 15;
+        font-size: clamp(28px, 5vw, 52px);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #f8fafc;
+        text-shadow: 0 0 16px #38bdf8;
+        opacity: 0;
+        transition: opacity 120ms linear;
+        pointer-events: none;
+      }
+
+      #judgment.show {
+        opacity: 1;
+      }
+
+      #result {
+        position: fixed;
+        right: 12px;
+        top: 12px;
+        z-index: 11;
+        padding: 12px;
+        border: 1px solid #334155;
+        background: rgba(2, 6, 23, 0.82);
+        border-radius: 8px;
+        width: min(300px, calc(100vw - 24px));
+        display: none;
+        gap: 6px;
+      }
+
+      #result.show {
+        display: grid;
       }
 
       button,
-      input[type="file"] {
+      input,
+      select {
         font: inherit;
       }
 
@@ -59,6 +113,10 @@
         opacity: 0.5;
         cursor: not-allowed;
       }
+
+      input[type="range"] {
+        width: 140px;
+      }
     </style>
   </head>
   <body>
@@ -67,14 +125,47 @@
         Load song:
         <input id="audio-file" type="file" accept="audio/*" />
       </label>
-      <button id="play-button" disabled>Play</button>
+      <div id="hud-row">
+        <button id="play-button" disabled>Play</button>
+        <button id="compact-toggle" type="button">Compact HUD</button>
+        <label>
+          Difficulty
+          <select id="difficulty">
+            <option value="chill">Chill</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hyper">Hyper</option>
+          </select>
+        </label>
+        <label>
+          Sync
+          <input id="timing-offset" type="range" min="-120" max="120" step="1" value="0" />
+          <span id="timing-offset-label">0ms</span>
+        </label>
+      </div>
       <div id="stats">
         <span id="score">Score: 0</span>
         <span id="combo">Combo: 0</span>
         <span id="max-combo">Max Combo: 0</span>
       </div>
-      <div id="debug">Playing: false Pending: 0 Active: 0</div>
+      <div id="perf">
+        <span id="accuracy">Accuracy: 0.0%</span>
+        <span id="breakdown">P:0 G:0 g:0 M:0</span>
+      </div>
+      <div id="debug">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
     </div>
+
+    <div id="judgment"></div>
+
+    <div id="result">
+      <strong>Song Complete</strong>
+      <span id="result-score">Score: 0</span>
+      <span id="result-medal">Medal: -</span>
+      <span id="result-personal-best">Personal Best: 0</span>
+      <span id="result-accuracy">Accuracy: 0.0%</span>
+      <span id="result-max-combo">Max Combo: 0</span>
+      <span id="result-breakdown">P:0 G:0 g:0 M:0</span>
+    </div>
+
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
