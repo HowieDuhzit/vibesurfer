@@ -5,6 +5,9 @@ export class HitLineEffect {
   private readonly mesh: THREE.Mesh;
   private readonly material: THREE.MeshStandardMaterial;
   private readonly color = new THREE.Color();
+  private readonly missColor = new THREE.Color(0xf43f5e);
+  private hitBoost = 0;
+  private missCrack = 0;
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.BoxGeometry(LANE_WIDTH * (LANES + 1), 0.03, 0.36);
@@ -23,12 +26,26 @@ export class HitLineEffect {
   }
 
   public update(energy: number, bass: number, treble: number): void {
+    this.hitBoost += (0 - this.hitBoost) * 0.12;
+    this.missCrack += (0 - this.missCrack) * 0.1;
+
     this.color.setHSL(0.58 - treble * 0.2 + bass * 0.06, 0.95, 0.6 + energy * 0.2);
+    if (this.missCrack > 0.02) {
+      this.color.lerp(this.missColor, Math.min(0.8, this.missCrack));
+    }
     this.material.color.copy(this.color);
     this.material.emissive.copy(this.color);
-    this.material.emissiveIntensity = 0.9 + energy * 2.2;
+    this.material.emissiveIntensity = 0.9 + energy * 2.2 + this.hitBoost * 2.2;
 
-    const pulse = 1 + bass * 0.35;
+    const pulse = 1 + bass * 0.35 + this.hitBoost * 0.16 + this.missCrack * 0.08;
     this.mesh.scale.set(1, 1, pulse);
+  }
+
+  public triggerHit(strength = 1): void {
+    this.hitBoost = Math.max(this.hitBoost, Math.max(0.1, Math.min(1, strength)));
+  }
+
+  public triggerMiss(): void {
+    this.missCrack = 1;
   }
 }

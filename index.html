@@ -34,28 +34,38 @@
         background: rgba(2, 6, 23, 0.78);
         border-radius: 8px;
         backdrop-filter: blur(6px);
-        width: min(520px, calc(100vw - 24px));
+        width: min(620px, calc(100vw - 24px));
       }
 
       #hud.compact {
         width: auto;
-        max-width: 320px;
+        max-width: 360px;
       }
 
       #hud.compact #perf,
       #hud.compact #debug,
-      #hud.compact #settings {
+      #hud.compact #settings,
+      #hud.compact #chart-preview,
+      #hud.compact #progress {
         display: none;
       }
 
       #hud-row,
       #stats,
       #perf,
-      #settings {
+      #settings,
+      #chart-preview,
+      #progress {
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
         align-items: center;
+      }
+
+      #chart-preview,
+      #progress {
+        font-size: 13px;
+        opacity: 0.95;
       }
 
       #judgment {
@@ -87,13 +97,36 @@
         border: 1px solid #334155;
         background: rgba(2, 6, 23, 0.82);
         border-radius: 8px;
-        width: min(300px, calc(100vw - 24px));
+        width: min(360px, calc(100vw - 24px));
         display: none;
         gap: 6px;
       }
 
       #result.show {
         display: grid;
+      }
+
+      #touch-zones {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 12;
+        display: none;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 4px;
+        padding: 8px;
+      }
+
+      #touch-zones.show {
+        display: grid;
+      }
+
+      #touch-zones button {
+        height: 64px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        background: rgba(15, 23, 42, 0.55);
       }
 
       button,
@@ -117,7 +150,7 @@
       }
 
       input[type="range"] {
-        width: 140px;
+        width: 120px;
       }
     </style>
   </head>
@@ -131,6 +164,14 @@
         <button id="play-button" disabled>Play</button>
         <button id="compact-toggle" type="button">Compact HUD</button>
         <label>
+          Mode
+          <select id="game-mode">
+            <option value="chart" selected>Chart</option>
+            <option value="practice">Practice</option>
+            <option value="endless">Endless</option>
+          </select>
+        </label>
+        <label>
           Difficulty
           <select id="difficulty">
             <option value="chill">Chill</option>
@@ -139,10 +180,43 @@
           </select>
         </label>
         <label>
+          Strict
+          <input id="strict-mode" type="checkbox" />
+        </label>
+        <label>
+          Mirror
+          <input id="mirror-lanes" type="checkbox" />
+        </label>
+      </div>
+      <div id="hud-row">
+        <label>
           Sync
           <input id="timing-offset" type="range" min="-120" max="120" step="1" value="0" />
           <span id="timing-offset-label">0ms</span>
         </label>
+        <label>
+          Seed
+          <input id="seed-input" type="number" value="123456789" style="width: 120px" />
+        </label>
+        <button id="apply-seed">Apply Seed</button>
+        <button id="calibrate-btn">Calibrate</button>
+      </div>
+      <div id="hud-row">
+        <label>
+          Practice Speed
+          <input id="practice-speed" type="range" min="55" max="115" step="1" value="85" />
+          <span id="practice-speed-label">85%</span>
+        </label>
+        <label>
+          Loop Start
+          <input id="loop-start" type="number" min="0" step="0.1" value="0" style="width: 72px" />
+        </label>
+        <label>
+          Loop End
+          <input id="loop-end" type="number" min="0" step="0.1" value="0" style="width: 72px" />
+        </label>
+        <button id="apply-loop">Apply Loop</button>
+        <button id="clear-loop">Clear Loop</button>
       </div>
       <div id="stats">
         <span id="score">Score: 0</span>
@@ -174,6 +248,29 @@
           <input id="lane-tolerance" type="range" min="30" max="120" step="1" value="55" />
           <span id="lane-tolerance-label">55%</span>
         </label>
+        <label>
+          Cam Pulse
+          <input id="camera-pulse" type="checkbox" checked />
+        </label>
+        <label>
+          Metro
+          <input id="metronome-enabled" type="checkbox" />
+        </label>
+        <label>
+          BPM
+          <input id="metronome-bpm" type="number" min="60" max="220" step="1" value="120" style="width: 72px" />
+        </label>
+        <label>
+          Touch UI
+          <input id="touch-zones-toggle" type="checkbox" />
+        </label>
+      </div>
+      <div id="chart-preview">
+        <span id="chart-summary">Chart: -</span>
+      </div>
+      <div id="progress">
+        <span id="profile-summary">Profile: -</span>
+        <span id="mission-summary">Missions: -</span>
       </div>
       <div id="debug">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
     </div>
@@ -190,6 +287,12 @@
       <span id="result-breakdown">P:0 G:0 g:0 M:0</span>
       <span id="result-types">Tap:0 Hold:0 Slide:0 Double:0 Mines:0</span>
       <span id="result-tech">Hold C/B:0/0 Slide C/B:0/0</span>
+    </div>
+
+    <div id="touch-zones">
+      <button id="touch-lane-0">Left</button>
+      <button id="touch-lane-1">Center</button>
+      <button id="touch-lane-2">Right</button>
     </div>
 
     <div id="app"></div>

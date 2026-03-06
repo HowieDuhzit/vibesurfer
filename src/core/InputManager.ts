@@ -3,9 +3,11 @@ import { LANES } from "./Config";
 export class InputManager {
   private targetLane = 1;
   private pendingDelta = 0;
+  private absoluteLane: number | null = null;
   private leftHeld = false;
   private rightHeld = false;
   private keyboardControlActive = false;
+  private swipeEnabled = true;
 
   private touchStartX: number | null = null;
   private readonly minSwipeDistance = 35;
@@ -39,6 +41,23 @@ export class InputManager {
       this.targetLane = Math.max(0, Math.min(LANES - 1, this.targetLane + this.pendingDelta));
       this.pendingDelta = 0;
     }
+
+    if (this.absoluteLane !== null) {
+      this.targetLane = Math.max(0, Math.min(LANES - 1, this.absoluteLane));
+      this.absoluteLane = null;
+    }
+  }
+
+  public setAbsoluteLane(lane: number): void {
+    this.absoluteLane = Math.max(0, Math.min(LANES - 1, lane));
+  }
+
+  public nudge(delta: number): void {
+    this.pendingDelta += delta;
+  }
+
+  public setSwipeEnabled(enabled: boolean): void {
+    this.swipeEnabled = enabled;
   }
 
   public dispose(): void {
@@ -82,6 +101,11 @@ export class InputManager {
   };
 
   private onTouchEnd = (event: TouchEvent): void => {
+    if (!this.swipeEnabled) {
+      this.touchStartX = null;
+      return;
+    }
+
     if (this.touchStartX === null || event.changedTouches.length === 0) {
       return;
     }

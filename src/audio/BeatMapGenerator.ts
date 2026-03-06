@@ -28,6 +28,8 @@ export class BeatMapGenerator {
   private readonly queue: SpawnEvent[] = [];
   private readonly beatMarkerQueue: BeatMarkerEvent[] = [];
   private rngState = 123456789;
+  private mapSeed = 123456789;
+  private readonly lastGenerated: SpawnEvent[] = [];
 
   private readonly frameSize = FFT_SIZE * 2;
   private readonly hopSize = FFT_SIZE / 4;
@@ -42,6 +44,8 @@ export class BeatMapGenerator {
   public generateFromAudioBuffer(buffer: AudioBuffer): void {
     this.queue.length = 0;
     this.beatMarkerQueue.length = 0;
+    this.lastGenerated.length = 0;
+    this.rngState = this.mapSeed >>> 0;
 
     const sampleRate = buffer.sampleRate;
     const travelTime = (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED;
@@ -138,6 +142,7 @@ export class BeatMapGenerator {
         duration,
         slideToLane
       });
+      this.lastGenerated.push(this.queue[this.queue.length - 1]);
 
       // Double notes are explicit quick follow-up taps, never simultaneous.
       if (type === "double") {
@@ -154,6 +159,7 @@ export class BeatMapGenerator {
             duration: 0,
             slideToLane: echoLane
           });
+          this.lastGenerated.push(this.queue[this.queue.length - 1]);
         }
       }
     }
@@ -163,6 +169,19 @@ export class BeatMapGenerator {
     if (this.queue.length === 0) {
       this.generateFallbackGrid(buffer.duration);
     }
+  }
+
+  public setSeed(seed: number): void {
+    const next = Number.isFinite(seed) ? Math.floor(seed) : 123456789;
+    this.mapSeed = (next >>> 0) || 1;
+  }
+
+  public getSeed(): number {
+    return this.mapSeed;
+  }
+
+  public getPreview(): readonly SpawnEvent[] {
+    return this.lastGenerated;
   }
 
   public addBeat(beat: BeatEvent): void {
@@ -680,6 +699,7 @@ export class BeatMapGenerator {
         duration: 0,
         slideToLane: lane
       });
+      this.lastGenerated.push(this.queue[this.queue.length - 1]);
       this.beatMarkerQueue.push({
         spawnTime: beatTime - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED,
         beatTime,

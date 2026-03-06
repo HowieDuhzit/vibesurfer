@@ -15,7 +15,7 @@ import { CameraController } from "../render/CameraController";
 import { Lighting } from "../render/Lighting";
 import { Renderer } from "../render/Renderer";
 import { SceneManager } from "../render/SceneManager";
-import { HitJudgment, CollisionSystem } from "../systems/CollisionSystem";
+import { CollisionSystem, HitJudgment } from "../systems/CollisionSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { ScoreSystem } from "../systems/ScoreSystem";
 import { NoteSpawner } from "../world/NoteSpawner";
@@ -26,6 +26,7 @@ import { Time } from "./Time";
 
 export type DifficultyMode = "chill" | "normal" | "hyper";
 export type QualityMode = "auto" | "high" | "medium" | "low";
+export type GameMode = "chart" | "endless" | "practice";
 
 export class Game {
   private readonly renderer: Renderer;
@@ -60,22 +61,35 @@ export class Game {
 
   private difficulty: DifficultyMode = "normal";
   private timingOffsetMs = 0;
-
   private sectionEnergy = 0;
   private sectionTrend = 0;
-
   private cameraShake = 0;
+  private cameraFovPulse = 0;
   private songFinished = false;
 
   private judgmentLabel = "";
   private judgmentTimer = 0;
+
   private effectIntensity = 1;
   private laneTolerance = 0.55;
   private qualityMode: QualityMode = "auto";
+  private qualityScale = 1;
+
+  private gameMode: GameMode = "chart";
+  private strictMode = false;
+  private mirrorLanes = false;
+  private practiceSpeed = 0.85;
+  private loopStart = 0;
+  private loopEnd = 0;
+
+  private metronomeEnabled = false;
+  private metronomeBpm = 120;
+  private nextMetronomeBeat = 0;
+
+  private frameCostAvg = 1 / 60;
+  private qualityAdaptClock = 0;
 
   public constructor(private readonly mount: HTMLElement) {
-    // Initialization order:
-    // Renderer -> Scene -> Camera -> Lighting -> Track -> Player -> Audio -> Spawner -> Systems -> Game Loop
     this.renderer = new Renderer(this.mount);
     this.sceneManager = new SceneManager(this.renderer.scene);
     this.lighting = new Lighting(this.sceneManager.scene);
@@ -121,6 +135,11 @@ export class Game {
     this.beatDetector.onBeat((beat) => {
       const bassNorm = beat.bassEnergy / 255;
       this.beatPulseEffect.trigger(bassNorm);
+      this.cameraFovPulse = Math.min(1, this.cameraFovPulse + 0.25 + bassNorm * 0.45);
+
+      if (this.gameMode === "endless" && this.audioManager.isPlaying()) {
+        this.beatMapGenerator.addBeat(beat);
+      }
     });
 
     this.audioManager.onEnded(() => {
@@ -131,9 +150,10 @@ export class Game {
     this.setEffectIntensity(1);
     this.setLaneTolerance(0.55);
     this.setDifficulty("normal");
+    this.setGameMode("chart");
 
     this.gameLoop = new GameLoop(this.update);
-    this.cameraController.update(0, 0);
+    this.cameraController.update(0, 0, 0);
   }
 
   public start(): void {
@@ -154,12 +174,113 @@ export class Game {
     this.musicVisualizerBackground.randomizeStyle();
 
     await this.audioManager.loadAudioFile(file);
+    this.audioManager.setPlaybackRate(this.gameMode === "practice" ? this.practiceSpeed : 1);
     this.regenerateBeatMap();
   }
 
   public async playAudio(): Promise<void> {
     this.songFinished = false;
     await this.audioManager.play();
+    if (this.metronomeEnabled) {
+      const now = this.audioManager.isPlaying() ? this.audioManager.getCurrentTime() : 0;
+      this.nextMetronomeBeat = now;
+    }
+  }
+
+  public setGameMode(mode: GameMode): void {
+    this.gameMode = mode;
+    this.audioManager.setPlaybackRate(mode === "practice" ? this.practiceSpeed : 1);
+    if (mode === "endless") {
+      this.beatMapGenerator.clear();
+      this.spawner.reset();
+    } else {
+      this.regenerateBeatMap();
+    }
+  }
+
+  public getGameMode(): GameMode {
+    return this.gameMode;
+  }
+
+  public setStrictMode(enabled: boolean): void {
+    this.strictMode = enabled;
+    this.applyHitWindowForDifficulty();
+  }
+
+  public getStrictMode(): boolean {
+    return this.strictMode;
+  }
+
+  public setMirrorLanes(enabled: boolean): void {
+    this.mirrorLanes = enabled;
+  }
+
+  public getMirrorLanes(): boolean {
+    return this.mirrorLanes;
+  }
+
+  public setMetronomeEnabled(enabled: boolean): void {
+    this.metronomeEnabled = enabled;
+    this.nextMetronomeBeat = this.audioManager.getCurrentTime();
+  }
+
+  public getMetronomeEnabled(): boolean {
+    return this.metronomeEnabled;
+  }
+
+  public setMetronomeBpm(bpm: number): void {
+    this.metronomeBpm = Math.max(60, Math.min(220, bpm));
+  }
+
+  public getMetronomeBpm(): number {
+    return this.metronomeBpm;
+  }
+
+  public setCameraPulseEnabled(enabled: boolean): void {
+    this.cameraController.setFovPulseEnabled(enabled);
+  }
+
+  public setSwipeEnabled(enabled: boolean): void {
+    this.input.setSwipeEnabled(enabled);
+  }
+
+  public setAbsoluteLane(lane: number): void {
+    this.input.setAbsoluteLane(lane);
+  }
+
+  public setPracticeSpeed(speed: number): void {
+    this.practiceSpeed = Math.max(0.55, Math.min(1.15, speed));
+    if (this.gameMode === "practice") {
+      this.audioManager.setPlaybackRate(this.practiceSpeed);
+    }
+  }
+
+  public getPracticeSpeed(): number {
+    return this.practiceSpeed;
+  }
+
+  public setLoopRange(start: number, end: number): void {
+    const duration = this.audioManager.getDuration();
+    this.loopStart = Math.max(0, Math.min(duration, start));
+    this.loopEnd = Math.max(this.loopStart, Math.min(duration, end));
+  }
+
+  public clearLoopRange(): void {
+    this.loopStart = 0;
+    this.loopEnd = 0;
+  }
+
+  public getLoopRange(): Readonly<{ start: number; end: number }> {
+    return { start: this.loopStart, end: this.loopEnd };
+  }
+
+  public setSeed(seed: number): void {
+    this.beatMapGenerator.setSeed(seed);
+    this.regenerateBeatMap();
+  }
+
+  public getSeed(): number {
+    return this.beatMapGenerator.getSeed();
   }
 
   public setTimingOffsetMs(ms: number): void {
@@ -175,20 +296,92 @@ export class Game {
   public setDifficulty(mode: DifficultyMode): void {
     this.difficulty = mode;
     this.beatMapGenerator.setDifficulty(mode);
-
-    if (mode === "chill") {
-      this.collisionSystem.setHitWindow(0.62);
-    } else if (mode === "hyper") {
-      this.collisionSystem.setHitWindow(0.42);
-    } else {
-      this.collisionSystem.setHitWindow(0.5);
-    }
-
+    this.applyHitWindowForDifficulty();
     this.regenerateBeatMap();
   }
 
   public getDifficulty(): DifficultyMode {
     return this.difficulty;
+  }
+
+  public getCurrentAudioTime(): number {
+    return this.audioManager.getCurrentTime();
+  }
+
+  public getNearestBeatDeltaSeconds(audioTime: number): number | null {
+    const preview = this.beatMapGenerator.getPreview();
+    if (preview.length === 0) {
+      return null;
+    }
+
+    let best = Infinity;
+    for (let i = 0; i < preview.length; i += 1) {
+      const d = preview[i].beatTime - audioTime;
+      if (Math.abs(d) < Math.abs(best)) {
+        best = d;
+      }
+    }
+    return Number.isFinite(best) ? best : null;
+  }
+
+  public getChartPreviewSummary(): Readonly<{
+    total: number;
+    taps: number;
+    holds: number;
+    slides: number;
+    doubles: number;
+    mines: number;
+    lane0: number;
+    lane1: number;
+    lane2: number;
+    nps: number;
+  }> {
+    const preview = this.beatMapGenerator.getPreview();
+    let taps = 0;
+    let holds = 0;
+    let slides = 0;
+    let doubles = 0;
+    let mines = 0;
+    let lane0 = 0;
+    let lane1 = 0;
+    let lane2 = 0;
+
+    for (let i = 0; i < preview.length; i += 1) {
+      const note = preview[i];
+      if (note.type === "hold") {
+        holds += 1;
+      } else if (note.type === "slide") {
+        slides += 1;
+      } else if (note.type === "double") {
+        doubles += 1;
+      } else if (note.type === "mine") {
+        mines += 1;
+      } else {
+        taps += 1;
+      }
+
+      if (note.lane === 0) {
+        lane0 += 1;
+      } else if (note.lane === 1) {
+        lane1 += 1;
+      } else {
+        lane2 += 1;
+      }
+    }
+
+    const duration = Math.max(1, this.audioManager.getDuration());
+    return {
+      total: preview.length,
+      taps,
+      holds,
+      slides,
+      doubles,
+      mines,
+      lane0,
+      lane1,
+      lane2,
+      nps: preview.length / duration
+    };
   }
 
   public getScoreState(): Readonly<{
@@ -296,18 +489,40 @@ export class Game {
 
   public setQualityMode(mode: QualityMode): void {
     this.qualityMode = mode;
-    const scale = this.resolveQualityScale(mode);
-    this.particleSystem.setQualityScale(scale);
-    this.playerTrailEffect.setQualityScale(scale);
-    this.musicVisualizerBackground.setQualityScale(scale);
-    this.frequencySideRailsEffect.setQualityScale(scale);
+    this.applyQualityScale(this.resolveQualityScale(mode));
   }
 
   public getQualityMode(): QualityMode {
     return this.qualityMode;
   }
 
+  private applyHitWindowForDifficulty(): void {
+    let window = 0.5;
+    if (this.difficulty === "chill") {
+      window = 0.62;
+    } else if (this.difficulty === "hyper") {
+      window = 0.42;
+    }
+    if (this.strictMode) {
+      window *= 0.83;
+      this.setLaneTolerance(0.45);
+    }
+    this.collisionSystem.setHitWindow(window);
+  }
+
+  private applyQualityScale(scale: number): void {
+    this.qualityScale = Math.max(0.25, Math.min(1, scale));
+    this.particleSystem.setQualityScale(this.qualityScale);
+    this.playerTrailEffect.setQualityScale(this.qualityScale);
+    this.musicVisualizerBackground.setQualityScale(this.qualityScale);
+    this.frequencySideRailsEffect.setQualityScale(this.qualityScale);
+  }
+
   private regenerateBeatMap(): void {
+    if (this.gameMode === "endless") {
+      return;
+    }
+
     const buffer = this.audioManager.getLoadedBuffer();
     if (!buffer) {
       return;
@@ -320,6 +535,7 @@ export class Game {
 
   private onNoteCollected(x: number, y: number, z: number, lane: number, judgment: HitJudgment): void {
     this.particleSystem.emitBurst(x, y, z, lane);
+    this.hitLineEffect.triggerHit(judgment === "perfect" ? 1 : judgment === "great" ? 0.65 : 0.45);
     this.cameraShake = Math.min(1, this.cameraShake + (judgment === "perfect" ? 0.45 : judgment === "great" ? 0.28 : 0.16));
     this.judgmentLabel = judgment.toUpperCase();
     this.judgmentTimer = 0.5;
@@ -327,22 +543,35 @@ export class Game {
 
   private onMineHit(x: number, y: number, z: number, lane: number): void {
     this.particleSystem.emitBurst(x, y, z, lane);
+    this.hitLineEffect.triggerMiss();
     this.cameraShake = Math.min(1, this.cameraShake + 0.52);
     this.judgmentLabel = "MISS";
     this.judgmentTimer = 0.45;
   }
 
   private update = (time: Time): void => {
-    // 1) update time (already updated by GameLoop before callback)
+    this.frameCostAvg += (time.deltaTime - this.frameCostAvg) * Math.min(1, time.deltaTime * 2.6);
+    this.qualityAdaptClock += time.deltaTime;
 
-    // 2) update input
+    if (this.qualityMode === "auto" && this.qualityAdaptClock > 2.5) {
+      this.qualityAdaptClock = 0;
+      if (this.frameCostAvg > 0.03 && this.qualityScale > 0.38) {
+        this.applyQualityScale(this.qualityScale > 0.64 ? 0.64 : 0.38);
+      } else if (this.frameCostAvg < 0.018 && this.qualityScale < 1) {
+        this.applyQualityScale(this.qualityScale < 0.64 ? 0.64 : 1);
+      }
+    }
+
     this.input.update();
-    this.player.setTargetLane(this.input.getTargetLane());
+    let lane = this.input.getTargetLane();
+    if (this.mirrorLanes) {
+      lane = 2 - lane;
+    }
+    this.player.setTargetLane(lane);
 
     const isPlaying = this.audioManager.isPlaying();
 
     if (isPlaying) {
-      // 3) update audio analysis
       this.audioAnalyzer.update();
       const energyNorm = this.audioAnalyzer.getCurrentEnergy() / 255;
       const bassNorm = this.audioAnalyzer.getCurrentBassEnergy() / 255;
@@ -361,54 +590,51 @@ export class Game {
       this.spawner.setMusicReactiveColor(energyNorm, bassNorm, trebleNorm, fever);
       this.hitLineEffect.update(energyNorm, bassNorm, trebleNorm);
       this.comboRingEffect.update(time.deltaTime, this.scoreSystem.combo, energyNorm);
-      this.frequencySideRailsEffect.update(
-        time.deltaTime,
-        energyNorm,
-        bassNorm,
-        trebleNorm,
-        this.audioAnalyzer.getFrequencyData()
-      );
-      this.musicVisualizerBackground.update(
-        time.deltaTime,
-        energyNorm,
-        bassNorm,
-        trebleNorm,
-        this.audioAnalyzer.getFrequencyData()
-      );
+      this.frequencySideRailsEffect.update(time.deltaTime, energyNorm, bassNorm, trebleNorm, this.audioAnalyzer.getFrequencyData());
+      this.musicVisualizerBackground.update(time.deltaTime, energyNorm, bassNorm, trebleNorm, this.audioAnalyzer.getFrequencyData());
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, energyNorm, bassNorm, fever);
 
-      // 4) update beat detector
       const audioTime = this.audioManager.getCurrentTime();
       this.beatDetector.update(audioTime);
 
-      // 5) update note spawner
+      if (this.gameMode === "practice" && this.loopEnd > this.loopStart && audioTime >= this.loopEnd) {
+        this.audioManager.seek(this.loopStart);
+      }
+
       this.pendingSpawnEvents.length = 0;
       this.beatMapGenerator.popSpawnEvents(audioTime, this.pendingSpawnEvents);
       this.spawner.updateSpawnEvents(this.pendingSpawnEvents);
 
-      // 6) update entity movement
       this.movementSystem.update(time.deltaTime);
-
-      // 7) update collision system
       this.collisionSystem.update(time.deltaTime);
 
-      // 8) update scoring and effects
       this.scoreSystem.update();
       this.beatPulseEffect.update(time.deltaTime);
       this.particleSystem.update(time.deltaTime);
+
+      if (this.metronomeEnabled) {
+        const beatInterval = 60 / this.metronomeBpm;
+        while (audioTime >= this.nextMetronomeBeat) {
+          this.nextMetronomeBeat += beatInterval;
+          this.beatPulseEffect.trigger(0.5);
+          this.cameraFovPulse = Math.min(1, this.cameraFovPulse + 0.3);
+        }
+      }
     } else {
       this.hitLineEffect.update(0.08, 0.06, 0.12);
       this.comboRingEffect.update(time.deltaTime, this.scoreSystem.combo, 0.08);
       this.frequencySideRailsEffect.update(time.deltaTime, 0.08, 0.06, 0.12);
       this.musicVisualizerBackground.update(time.deltaTime, 0, 0, 0);
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, 0.08, 0.06, 0);
+      this.movementSystem.update(time.deltaTime);
+      this.particleSystem.update(time.deltaTime);
     }
 
     this.cameraShake += (0 - this.cameraShake) * Math.min(1, time.deltaTime * 8);
+    this.cameraFovPulse += (0 - this.cameraFovPulse) * Math.min(1, time.deltaTime * 6);
     this.judgmentTimer = Math.max(0, this.judgmentTimer - time.deltaTime);
 
-    // 9) render frame
-    this.cameraController.update(time.deltaTime, this.cameraShake);
+    this.cameraController.update(time.deltaTime, this.cameraShake, this.cameraFovPulse);
     this.renderer.render();
   };
 

@@ -10,6 +10,7 @@ export class AudioManager {
 
   private playbackStartContextTime = 0;
   private playbackOffset = 0;
+  private playbackRate = 1;
   private playing = false;
   private readonly endedListeners: Array<() => void> = [];
 
@@ -65,6 +66,7 @@ export class AudioManager {
 
     this.sourceNode = context.createBufferSource();
     this.sourceNode.buffer = this.audioBuffer;
+    this.sourceNode.playbackRate.value = this.playbackRate;
     this.sourceNode.connect(this.analyserNode);
     this.playbackStartContextTime = context.currentTime;
     this.sourceNode.start(0, this.playbackOffset);
@@ -86,7 +88,10 @@ export class AudioManager {
     }
 
     const context = this.getAudioContext();
-    this.playbackOffset = Math.max(0, context.currentTime - this.playbackStartContextTime + this.playbackOffset);
+    this.playbackOffset = Math.max(
+      0,
+      (context.currentTime - this.playbackStartContextTime) * this.playbackRate + this.playbackOffset
+    );
     this.stopSourceOnly();
     this.playing = false;
   }
@@ -97,7 +102,7 @@ export class AudioManager {
     }
 
     const context = this.getAudioContext();
-    return context.currentTime - this.playbackStartContextTime + this.playbackOffset;
+    return (context.currentTime - this.playbackStartContextTime) * this.playbackRate + this.playbackOffset;
   }
 
   public isPlaying(): boolean {
@@ -106,6 +111,25 @@ export class AudioManager {
 
   public onEnded(listener: () => void): void {
     this.endedListeners.push(listener);
+  }
+
+  public setPlaybackRate(rate: number): void {
+    this.playbackRate = Math.max(0.5, Math.min(1.5, rate));
+    if (this.sourceNode) {
+      this.sourceNode.playbackRate.value = this.playbackRate;
+    }
+  }
+
+  public getPlaybackRate(): number {
+    return this.playbackRate;
+  }
+
+  public seek(timeSeconds: number): void {
+    const duration = this.audioBuffer?.duration ?? 0;
+    this.playbackOffset = Math.max(0, Math.min(duration, timeSeconds));
+    if (this.playing) {
+      void this.play();
+    }
   }
 
   private stopSourceOnly(): void {
