@@ -1,11 +1,13 @@
 import { FFT_SIZE, HIT_LINE_Z_OFFSET, LANES, SPAWN_DISTANCE, TRACK_SPEED } from "../core/Config";
 import { BeatEvent } from "./BeatDetector";
+import { NoteType } from "../entities/Note";
 
 export interface SpawnEvent {
   spawnTime: number;
   beatTime: number;
   lane: number;
   bassEnergy: number;
+  type: NoteType;
 }
 
 export interface BeatMarkerEvent {
@@ -88,6 +90,7 @@ export class BeatMapGenerator {
     const lowMean = this.mean(analysis.lowBand);
     const midMean = this.mean(analysis.midBand);
     const highMean = this.mean(analysis.highBand);
+    const fluxMean = this.mean(analysis.flux);
 
     let prevLane = 1;
     let repeatCount = 0;
@@ -121,11 +124,22 @@ export class BeatMapGenerator {
       lastTime = beatTime;
 
       const bassEnergy = Math.max(32, Math.min(255, Math.round(Math.log1p(analysis.lowBand[frame]) * 26)));
+      const strength = analysis.flux[frame] / Math.max(1e-6, fluxMean);
+      const type = this.pickNoteType(
+        strength,
+        analysis.lowBand[frame],
+        analysis.midBand[frame],
+        analysis.highBand[frame],
+        lowMean,
+        midMean,
+        highMean
+      );
       this.queue.push({
         spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
         beatTime: beatTime + this.timingOffsetSeconds,
         lane: laneResult.lane,
-        bassEnergy
+        bassEnergy,
+        type
       });
     }
 
@@ -140,7 +154,8 @@ export class BeatMapGenerator {
       spawnTime: beat.timestamp - travelTime,
       beatTime: beat.timestamp,
       lane: this.nextLane(),
-      bassEnergy: beat.bassEnergy
+      bassEnergy: beat.bassEnergy,
+      type: "tap"
     });
   }
 
@@ -616,7 +631,8 @@ export class BeatMapGenerator {
         spawnTime: beatTime - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED,
         beatTime,
         lane,
-        bassEnergy: 96
+        bassEnergy: 96,
+        type: "tap"
       });
       this.beatMarkerQueue.push({
         spawnTime: beatTime - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED,
@@ -733,5 +749,39 @@ export class BeatMapGenerator {
   private nextLane(): number {
     this.rngState = (1664525 * this.rngState + 1013904223) >>> 0;
     return this.rngState % LANES;
+  }
+
+  private nextRandom(): number {
+    this.rngState = (1664525 * this.rngState + 1013904223) >>> 0;
+    return this.rngState / 0xffffffff;
+  }
+
+  private pickNoteType(
+    strength: number,
+    low: number,
+    mid: number,
+    high: number,
+    lowMean: number,
+    midMean: number,
+    highMean: number
+  ): NoteType {
+    const ln = low / Math.max(1e-6, lowMean);
+    const mn = mid / Math.max(1e-6, midMean);
+    const hn = high / Math.max(1e-6, highMean);
+    const r = this.nextRandom();
+
+    if (this.difficulty === "hyper" && strength > 1.4 && r < 0.06) {
+      return "mine";
+    }
+    if (strength > 1.26 && ln > Math.max(mn, hn) * 1.05 && r < 0.22) {
+      return "hold";
+    }
+    if (strength > 1.16 && hn > mn * 1.06 && r < 0.2) {
+      return "slide";
+    }
+    if (this.difficulty !== "chill" && strength > 1.22 && r < 0.16) {
+      return "double";
+    }
+    return "tap";
   }
 }

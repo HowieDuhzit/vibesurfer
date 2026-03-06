@@ -1,3 +1,4 @@
+import { NoteType } from "../entities/Note";
 import { HitJudgment } from "./CollisionSystem";
 
 export class ScoreSystem {
@@ -10,9 +11,10 @@ export class ScoreSystem {
   public great = 0;
   public good = 0;
   public misses = 0;
+  public mineHits = 0;
   public lastJudgment: HitJudgment | "miss" | null = null;
 
-  public onNoteCollected(judgment: HitJudgment): void {
+  public onNoteCollected(judgment: HitJudgment, noteType: NoteType, expressiveHit: boolean): void {
     this.combo += 1;
     this.maxCombo = Math.max(this.maxCombo, this.combo);
     this.totalNotes += 1;
@@ -29,13 +31,22 @@ export class ScoreSystem {
 
     const comboMultiplier = 1 + this.combo * 0.1;
     const base = judgment === "perfect" ? 130 : judgment === "great" ? 100 : 70;
-    this.score += base * comboMultiplier;
+    const noteTypeMult = noteType === "hold" ? 1.35 : noteType === "double" ? 1.55 : noteType === "slide" ? 1.25 : 1;
+    const expressiveBonus = expressiveHit ? 35 : 0;
+    this.score += base * comboMultiplier * noteTypeMult + expressiveBonus;
   }
 
   public onNoteMissed(): void {
     this.combo = 0;
     this.totalNotes += 1;
     this.misses += 1;
+    this.lastJudgment = "miss";
+  }
+
+  public onMineHit(): void {
+    this.combo = 0;
+    this.mineHits += 1;
+    this.score = Math.max(0, this.score - 220);
     this.lastJudgment = "miss";
   }
 
@@ -58,6 +69,7 @@ export class ScoreSystem {
     this.great = 0;
     this.good = 0;
     this.misses = 0;
+    this.mineHits = 0;
     this.lastJudgment = null;
   }
 

@@ -5,9 +5,11 @@ import { BeatDetector } from "../audio/BeatDetector";
 import { BeatMapGenerator, SpawnEvent } from "../audio/BeatMapGenerator";
 import { BeatPulseEffect } from "../effects/BeatPulseEffect";
 import { ComboRingEffect } from "../effects/ComboRingEffect";
+import { FrequencySideRailsEffect } from "../effects/FrequencySideRailsEffect";
 import { HitLineEffect } from "../effects/HitLineEffect";
 import { MusicVisualizerBackground } from "../effects/MusicVisualizerBackground";
 import { ParticleSystem } from "../effects/ParticleSystem";
+import { PlayerTrailEffect } from "../effects/PlayerTrailEffect";
 import { Player } from "../entities/Player";
 import { CameraController } from "../render/CameraController";
 import { Lighting } from "../render/Lighting";
@@ -47,6 +49,8 @@ export class Game {
   private readonly beatPulseEffect: BeatPulseEffect;
   private readonly particleSystem: ParticleSystem;
   private readonly musicVisualizerBackground: MusicVisualizerBackground;
+  private readonly frequencySideRailsEffect: FrequencySideRailsEffect;
+  private readonly playerTrailEffect: PlayerTrailEffect;
   private readonly hitLineEffect: HitLineEffect;
   private readonly comboRingEffect: ComboRingEffect;
 
@@ -93,6 +97,8 @@ export class Game {
     this.scoreSystem = new ScoreSystem();
     this.particleSystem = new ParticleSystem(this.sceneManager.scene);
     this.musicVisualizerBackground = new MusicVisualizerBackground(this.sceneManager.scene);
+    this.frequencySideRailsEffect = new FrequencySideRailsEffect(this.sceneManager.scene);
+    this.playerTrailEffect = new PlayerTrailEffect(this.sceneManager.scene);
     this.hitLineEffect = new HitLineEffect(this.sceneManager.scene);
     this.comboRingEffect = new ComboRingEffect(this.sceneManager.scene, this.player);
 
@@ -101,14 +107,16 @@ export class Game {
       this.player,
       this.spawner,
       this.scoreSystem,
-      (x, y, z, lane, judgment) => this.onNoteCollected(x, y, z, lane, judgment)
+      (x, y, z, lane, judgment) => this.onNoteCollected(x, y, z, lane, judgment),
+      (x, y, z, lane) => this.onMineHit(x, y, z, lane)
     );
 
     this.cameraController = new CameraController(this.renderer.camera, this.player);
     this.beatPulseEffect = new BeatPulseEffect(this.track);
 
     this.beatDetector.onBeat((beat) => {
-      this.beatPulseEffect.trigger(beat.bassEnergy / 255);
+      const bassNorm = beat.bassEnergy / 255;
+      this.beatPulseEffect.trigger(bassNorm);
     });
 
     this.audioManager.onEnded(() => {
@@ -254,6 +262,13 @@ export class Game {
     this.judgmentTimer = 0.5;
   }
 
+  private onMineHit(x: number, y: number, z: number, lane: number): void {
+    this.particleSystem.emitBurst(x, y, z, lane);
+    this.cameraShake = Math.min(1, this.cameraShake + 0.52);
+    this.judgmentLabel = "MISS";
+    this.judgmentTimer = 0.45;
+  }
+
   private update = (time: Time): void => {
     // 1) update time (already updated by GameLoop before callback)
 
@@ -272,15 +287,24 @@ export class Game {
 
       this.sectionTrend += (energyNorm - this.sectionEnergy) * Math.min(1, time.deltaTime * 2.2);
       this.sectionEnergy += (energyNorm - this.sectionEnergy) * Math.min(1, time.deltaTime * 1.8);
+      const fever = Math.max(0, Math.min(1, (this.scoreSystem.combo - 16) / 24));
 
       this.track.setMusicReactiveColor(
         Math.max(0, Math.min(1, this.sectionEnergy + this.sectionTrend * 0.35)),
         bassNorm,
-        trebleNorm
+        trebleNorm,
+        fever
       );
-      this.spawner.setMusicReactiveColor(energyNorm, bassNorm, trebleNorm);
+      this.spawner.setMusicReactiveColor(energyNorm, bassNorm, trebleNorm, fever);
       this.hitLineEffect.update(energyNorm, bassNorm, trebleNorm);
       this.comboRingEffect.update(time.deltaTime, this.scoreSystem.combo, energyNorm);
+      this.frequencySideRailsEffect.update(
+        time.deltaTime,
+        energyNorm,
+        bassNorm,
+        trebleNorm,
+        this.audioAnalyzer.getFrequencyData()
+      );
       this.musicVisualizerBackground.update(
         time.deltaTime,
         energyNorm,
@@ -288,6 +312,7 @@ export class Game {
         trebleNorm,
         this.audioAnalyzer.getFrequencyData()
       );
+      this.playerTrailEffect.update(time.deltaTime, this.player.position.x, energyNorm, bassNorm, fever);
 
       // 4) update beat detector
       const audioTime = this.audioManager.getCurrentTime();
@@ -302,7 +327,7 @@ export class Game {
       this.movementSystem.update(time.deltaTime);
 
       // 7) update collision system
-      this.collisionSystem.update();
+      this.collisionSystem.update(time.deltaTime);
 
       // 8) update scoring and effects
       this.scoreSystem.update();
@@ -311,7 +336,9 @@ export class Game {
     } else {
       this.hitLineEffect.update(0.08, 0.06, 0.12);
       this.comboRingEffect.update(time.deltaTime, this.scoreSystem.combo, 0.08);
+      this.frequencySideRailsEffect.update(time.deltaTime, 0.08, 0.06, 0.12);
       this.musicVisualizerBackground.update(time.deltaTime, 0, 0, 0);
+      this.playerTrailEffect.update(time.deltaTime, this.player.position.x, 0.08, 0.06, 0);
     }
 
     this.cameraShake += (0 - this.cameraShake) * Math.min(1, time.deltaTime * 8);

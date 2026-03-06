@@ -65,16 +65,16 @@ export class Track {
     }
   }
 
-  public setMusicReactiveColor(energy: number, bass: number, treble: number): void {
-    const lineHue = 0.58 - treble * 0.2;
+  public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
+    const lineHue = 0.58 - treble * 0.2 + fever * 0.06;
     this.tempColor.setHSL(lineHue, 0.85, 0.5 + energy * 0.15);
     this.lineMaterial.color.copy(this.tempColor);
     this.lineMaterial.emissive.copy(this.tempColor);
-    this.lineMaterial.emissiveIntensity = 0.5 + energy * 1.4;
+    this.lineMaterial.emissiveIntensity = 0.5 + energy * 1.4 + fever * 2.4;
 
-    this.tempColor.setHSL(0.6 - bass * 0.08, 0.45, 0.12 + bass * 0.12);
+    this.tempColor.setHSL(0.6 - bass * 0.08 + fever * 0.03, 0.45 + fever * 0.2, 0.12 + bass * 0.12);
     this.segmentMaterial.color.copy(this.tempColor);
     this.segmentMaterial.emissive.copy(this.tempColor);
-    this.segmentMaterial.emissiveIntensity = 0.2 + bass * 0.5;
+    this.segmentMaterial.emissiveIntensity = 0.2 + bass * 0.5 + fever * 0.8;
   }
 }

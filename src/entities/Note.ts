@@ -4,19 +4,19 @@ import { Entity } from "./Entity";
 
 const laneX = [-LANE_WIDTH, 0, LANE_WIDTH];
 
-export type NoteType = "beat";
+export type NoteType = "tap" | "hold" | "double" | "slide" | "mine";
 
 export class Note extends Entity {
   public lane = 1;
   public zPosition = -SPAWN_DISTANCE;
-  public type: NoteType = "beat";
+  public type: NoteType = "tap";
   public active = false;
 
   public constructor(public readonly instanceId: number) {
     super(new THREE.Object3D());
   }
 
-  public spawn(lane: number, type: NoteType = "beat"): void {
+  public spawn(lane: number, type: NoteType = "tap"): void {
     this.lane = lane;
     this.zPosition = -SPAWN_DISTANCE;
     this.type = type;

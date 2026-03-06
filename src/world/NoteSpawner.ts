@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { LANE_WIDTH, LANES, NOTE_POOL_SIZE, SPAWN_DISTANCE } from "../core/Config";
 import { BeatMarkerEvent, SpawnEvent } from "../audio/BeatMapGenerator";
+import { NoteType } from "../entities/Note";
 import { Note } from "../entities/Note";
 
 const MARKER_POOL_SIZE = NOTE_POOL_SIZE * 3;
@@ -23,7 +24,15 @@ export class NoteSpawner {
 
   private readonly material: THREE.MeshStandardMaterial;
   private readonly laneColors = [new THREE.Color(0xf97316), new THREE.Color(0x22d3ee), new THREE.Color(0xfacc15)];
+  private readonly typeColors: Record<NoteType, THREE.Color> = {
+    tap: new THREE.Color(0x60a5fa),
+    hold: new THREE.Color(0x34d399),
+    double: new THREE.Color(0xc084fc),
+    slide: new THREE.Color(0xf59e0b),
+    mine: new THREE.Color(0xf43f5e)
+  };
   private readonly tempColor = new THREE.Color();
+  private readonly mixedColor = new THREE.Color();
   private readonly markerMainColor = new THREE.Color(0xe0f2fe);
   private readonly markerBarColor = new THREE.Color(0xfef9c3);
 
@@ -93,10 +102,13 @@ export class NoteSpawner {
         continue;
       }
 
-      note.spawn(spawn.lane);
+      note.spawn(spawn.lane, spawn.type);
       note.zPosition = -SPAWN_DISTANCE;
       this.writeMatrix(note);
-      this.instancedMesh.setColorAt(note.instanceId, this.laneColors[spawn.lane] ?? this.laneColors[1]);
+      const laneColor = this.laneColors[spawn.lane] ?? this.laneColors[1];
+      const typeColor = this.typeColors[spawn.type] ?? this.typeColors.tap;
+      this.mixedColor.copy(laneColor).lerp(typeColor, 0.58);
+      this.instancedMesh.setColorAt(note.instanceId, this.mixedColor);
       this.activeIndices.push(note.instanceId);
     }
 
@@ -154,10 +166,10 @@ export class NoteSpawner {
     this.markerMesh.instanceMatrix.needsUpdate = true;
   }
 
-  public setMusicReactiveColor(energy: number, bass: number, treble: number): void {
-    this.tempColor.setHSL(0.56 - treble * 0.18 + bass * 0.05, 0.9, 0.45 + energy * 0.15);
+  public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
+    this.tempColor.setHSL(0.56 - treble * 0.18 + bass * 0.05 + fever * 0.03, 0.9, 0.45 + energy * 0.15 + fever * 0.12);
     this.material.emissive.copy(this.tempColor);
-    this.material.emissiveIntensity = 0.65 + energy * 1.5;
+    this.material.emissiveIntensity = 0.65 + energy * 1.5 + fever * 1.7;
   }
 
   public getActiveInstanceIds(): readonly number[] {
@@ -227,8 +239,22 @@ export class NoteSpawner {
 
   private writeMatrix(note: Note): void {
     this.matrixDummy.position.copy(note.mesh.position);
-    this.matrixDummy.rotation.set(0, 0, 0);
-    this.matrixDummy.scale.set(1, 1, 1);
+    if (note.type === "slide") {
+      this.matrixDummy.rotation.set(0, 0, Math.sin(note.zPosition * 0.25) * 0.32);
+      this.matrixDummy.scale.set(1.1, 1, 1.1);
+    } else if (note.type === "hold") {
+      this.matrixDummy.rotation.set(0, 0, 0);
+      this.matrixDummy.scale.set(0.95, 1.05, 1.8);
+    } else if (note.type === "double") {
+      this.matrixDummy.rotation.set(0, 0, 0);
+      this.matrixDummy.scale.set(1.35, 1.05, 1.35);
+    } else if (note.type === "mine") {
+      this.matrixDummy.rotation.set(0.8, note.zPosition * 0.08, 0.8);
+      this.matrixDummy.scale.set(0.78, 0.78, 0.78);
+    } else {
+      this.matrixDummy.rotation.set(0, 0, 0);
+      this.matrixDummy.scale.set(1, 1, 1);
+    }
     this.matrixDummy.updateMatrix();
     this.instancedMesh.setMatrixAt(note.instanceId, this.matrixDummy.matrix);
   }
