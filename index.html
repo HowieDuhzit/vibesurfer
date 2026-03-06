@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeSurfer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: radial-gradient(circle at top, #1f2937, #020617 65%);
+        color: #e5e7eb;
+        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+
+      #app {
+        position: fixed;
+        inset: 0;
+      }
+
+      #hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        display: grid;
+        gap: 8px;
+        padding: 12px;
+        border: 1px solid #334155;
+        background: rgba(2, 6, 23, 0.78);
+        border-radius: 8px;
+        backdrop-filter: blur(6px);
+      }
+
+      #stats {
+        display: flex;
+        gap: 12px;
+      }
+
+      button,
+      input[type="file"] {
+        font: inherit;
+      }
+
+      button {
+        padding: 8px 10px;
+        border: 1px solid #475569;
+        border-radius: 6px;
+        background: #0f172a;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">
+      <label>
+        Load song:
+        <input id="audio-file" type="file" accept="audio/*" />
+      </label>
+      <button id="play-button" disabled>Play</button>
+      <div id="stats">
+        <span id="score">Score: 0</span>
+        <span id="combo">Combo: 0</span>
+        <span id="max-combo">Max Combo: 0</span>
+      </div>
+      <div id="debug">Playing: false Pending: 0 Active: 0</div>
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
