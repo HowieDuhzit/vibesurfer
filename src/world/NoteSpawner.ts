@@ -35,6 +35,7 @@ export class NoteSpawner {
   private readonly mixedColor = new THREE.Color();
   private readonly markerMainColor = new THREE.Color(0xe0f2fe);
   private readonly markerBarColor = new THREE.Color(0xfef9c3);
+  private effectIntensity = 1;
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.CylinderGeometry(0.45, 0.45, 0.24, 16);
@@ -102,7 +103,7 @@ export class NoteSpawner {
         continue;
       }
 
-      note.spawn(spawn.lane, spawn.type);
+      note.spawn(spawn.lane, spawn.type, spawn.duration, spawn.slideToLane);
       note.zPosition = -SPAWN_DISTANCE;
       this.writeMatrix(note);
       const laneColor = this.laneColors[spawn.lane] ?? this.laneColors[1];
@@ -169,7 +170,11 @@ export class NoteSpawner {
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
     this.tempColor.setHSL(0.56 - treble * 0.18 + bass * 0.05 + fever * 0.03, 0.9, 0.45 + energy * 0.15 + fever * 0.12);
     this.material.emissive.copy(this.tempColor);
-    this.material.emissiveIntensity = 0.65 + energy * 1.5 + fever * 1.7;
+    this.material.emissiveIntensity = (0.65 + energy * 1.5 + fever * 1.7) * this.effectIntensity;
+  }
+
+  public setEffectIntensity(scale: number): void {
+    this.effectIntensity = Math.max(0.35, Math.min(2, scale));
   }
 
   public getActiveInstanceIds(): readonly number[] {
@@ -240,11 +245,12 @@ export class NoteSpawner {
   private writeMatrix(note: Note): void {
     this.matrixDummy.position.copy(note.mesh.position);
     if (note.type === "slide") {
-      this.matrixDummy.rotation.set(0, 0, Math.sin(note.zPosition * 0.25) * 0.32);
-      this.matrixDummy.scale.set(1.1, 1, 1.1);
+      const direction = Math.sign(note.slideToLane - note.lane);
+      this.matrixDummy.rotation.set(0, 0, direction * 0.42);
+      this.matrixDummy.scale.set(1.28, 1, 0.86);
     } else if (note.type === "hold") {
       this.matrixDummy.rotation.set(0, 0, 0);
-      this.matrixDummy.scale.set(0.95, 1.05, 1.8);
+      this.matrixDummy.scale.set(0.95, 1.05, 1.2 + note.duration * 1.6);
     } else if (note.type === "double") {
       this.matrixDummy.rotation.set(0, 0, 0);
       this.matrixDummy.scale.set(1.35, 1.05, 1.35);

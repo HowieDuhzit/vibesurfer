@@ -18,6 +18,8 @@ export class PlayerTrailEffect {
   private readonly dummy = new THREE.Object3D();
   private readonly color = new THREE.Color();
   private spawnAccumulator = 0;
+  private intensityScale = 1;
+  private qualityScale = 1;
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.PlaneGeometry(1.1, 0.72);
@@ -51,7 +53,10 @@ export class PlayerTrailEffect {
 
   public update(deltaTime: number, playerX: number, energy: number, bass: number, fever: number): void {
     this.spawnAccumulator += deltaTime;
-    const spawnInterval = Math.max(0.015, 0.038 - energy * 0.018 - fever * 0.008);
+    const spawnInterval = Math.max(
+      0.015,
+      (0.038 - energy * 0.018 - fever * 0.008) / Math.max(0.3, this.intensityScale * this.qualityScale)
+    );
 
     while (this.spawnAccumulator >= spawnInterval) {
       this.spawnAccumulator -= spawnInterval;
@@ -100,7 +105,15 @@ export class PlayerTrailEffect {
     }
 
     const material = this.mesh.material as THREE.MeshStandardMaterial;
-    material.opacity = 0.3 + energy * 0.25 + fever * 0.2;
-    material.emissiveIntensity = 0.4 + energy * 0.7 + fever * 1.1;
+    material.opacity = (0.3 + energy * 0.25 + fever * 0.2) * Math.max(0.45, this.intensityScale);
+    material.emissiveIntensity = (0.4 + energy * 0.7 + fever * 1.1) * Math.max(0.45, this.intensityScale);
+  }
+
+  public setIntensity(scale: number): void {
+    this.intensityScale = Math.max(0.3, Math.min(2, scale));
+  }
+
+  public setQualityScale(scale: number): void {
+    this.qualityScale = Math.max(0.25, Math.min(1, scale));
   }
 }

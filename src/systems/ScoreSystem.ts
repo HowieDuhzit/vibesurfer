@@ -12,6 +12,14 @@ export class ScoreSystem {
   public good = 0;
   public misses = 0;
   public mineHits = 0;
+  public holdCompleted = 0;
+  public holdBroken = 0;
+  public slideCompleted = 0;
+  public slideBroken = 0;
+  public tapHits = 0;
+  public holdHits = 0;
+  public slideHits = 0;
+  public doubleHits = 0;
   public lastJudgment: HitJudgment | "miss" | null = null;
 
   public onNoteCollected(judgment: HitJudgment, noteType: NoteType, expressiveHit: boolean): void {
@@ -27,6 +35,16 @@ export class ScoreSystem {
       this.great += 1;
     } else {
       this.good += 1;
+    }
+
+    if (noteType === "hold") {
+      this.holdHits += 1;
+    } else if (noteType === "slide") {
+      this.slideHits += 1;
+    } else if (noteType === "double") {
+      this.doubleHits += 1;
+    } else {
+      this.tapHits += 1;
     }
 
     const comboMultiplier = 1 + this.combo * 0.1;
@@ -50,6 +68,32 @@ export class ScoreSystem {
     this.lastJudgment = "miss";
   }
 
+  public onHoldCompleted(): void {
+    this.holdCompleted += 1;
+    this.score += 90 + this.combo * 2.2;
+  }
+
+  public onHoldBroken(): void {
+    this.combo = 0;
+    this.holdBroken += 1;
+    this.misses += 1;
+    this.totalNotes += 1;
+    this.lastJudgment = "miss";
+  }
+
+  public onSlideCompleted(): void {
+    this.slideCompleted += 1;
+    this.score += 110 + this.combo * 2.6;
+  }
+
+  public onSlideBroken(): void {
+    this.combo = 0;
+    this.slideBroken += 1;
+    this.misses += 1;
+    this.totalNotes += 1;
+    this.lastJudgment = "miss";
+  }
+
   public getAccuracy(): number {
     if (this.totalNotes === 0) {
       return 0;
@@ -70,6 +114,14 @@ export class ScoreSystem {
     this.good = 0;
     this.misses = 0;
     this.mineHits = 0;
+    this.holdCompleted = 0;
+    this.holdBroken = 0;
+    this.slideCompleted = 0;
+    this.slideBroken = 0;
+    this.tapHits = 0;
+    this.holdHits = 0;
+    this.slideHits = 0;
+    this.doubleHits = 0;
     this.lastJudgment = null;
   }
 

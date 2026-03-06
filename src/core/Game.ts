@@ -25,6 +25,7 @@ import { InputManager } from "./InputManager";
 import { Time } from "./Time";
 
 export type DifficultyMode = "chill" | "normal" | "hyper";
+export type QualityMode = "auto" | "high" | "medium" | "low";
 
 export class Game {
   private readonly renderer: Renderer;
@@ -68,6 +69,9 @@ export class Game {
 
   private judgmentLabel = "";
   private judgmentTimer = 0;
+  private effectIntensity = 1;
+  private laneTolerance = 0.55;
+  private qualityMode: QualityMode = "auto";
 
   public constructor(private readonly mount: HTMLElement) {
     // Initialization order:
@@ -123,6 +127,9 @@ export class Game {
       this.songFinished = true;
     });
 
+    this.setQualityMode("auto");
+    this.setEffectIntensity(1);
+    this.setLaneTolerance(0.55);
     this.setDifficulty("normal");
 
     this.gameLoop = new GameLoop(this.update);
@@ -193,9 +200,11 @@ export class Game {
     great: number;
     good: number;
     miss: number;
+    fever: number;
     judgment: string;
     judgmentVisible: boolean;
   }> {
+    const fever = Math.max(0, Math.min(1, (this.scoreSystem.combo - 16) / 24));
     return {
       score: Math.floor(this.scoreSystem.score),
       combo: this.scoreSystem.combo,
@@ -205,6 +214,7 @@ export class Game {
       great: this.scoreSystem.great,
       good: this.scoreSystem.good,
       miss: this.scoreSystem.misses,
+      fever,
       judgment: this.judgmentLabel,
       judgmentVisible: this.judgmentTimer > 0
     };
@@ -219,6 +229,15 @@ export class Game {
     great: number;
     good: number;
     miss: number;
+    mineHits: number;
+    tapHits: number;
+    holdHits: number;
+    slideHits: number;
+    doubleHits: number;
+    holdCompleted: number;
+    holdBroken: number;
+    slideCompleted: number;
+    slideBroken: number;
   }> {
     return {
       complete: this.songFinished,
@@ -228,7 +247,16 @@ export class Game {
       perfect: this.scoreSystem.perfect,
       great: this.scoreSystem.great,
       good: this.scoreSystem.good,
-      miss: this.scoreSystem.misses
+      miss: this.scoreSystem.misses,
+      mineHits: this.scoreSystem.mineHits,
+      tapHits: this.scoreSystem.tapHits,
+      holdHits: this.scoreSystem.holdHits,
+      slideHits: this.scoreSystem.slideHits,
+      doubleHits: this.scoreSystem.doubleHits,
+      holdCompleted: this.scoreSystem.holdCompleted,
+      holdBroken: this.scoreSystem.holdBroken,
+      slideCompleted: this.scoreSystem.slideCompleted,
+      slideBroken: this.scoreSystem.slideBroken
     };
   }
 
@@ -242,6 +270,41 @@ export class Game {
       activeNotes: this.spawner.getActiveCount(),
       progress: Math.max(0, Math.min(1, progress))
     };
+  }
+
+  public setEffectIntensity(scale: number): void {
+    this.effectIntensity = Math.max(0.3, Math.min(2, scale));
+    this.particleSystem.setIntensity(this.effectIntensity);
+    this.playerTrailEffect.setIntensity(this.effectIntensity);
+    this.musicVisualizerBackground.setIntensity(this.effectIntensity);
+    this.frequencySideRailsEffect.setIntensity(this.effectIntensity);
+    this.spawner.setEffectIntensity(this.effectIntensity);
+  }
+
+  public getEffectIntensity(): number {
+    return this.effectIntensity;
+  }
+
+  public setLaneTolerance(tolerance: number): void {
+    this.laneTolerance = Math.max(0.3, Math.min(1.2, tolerance));
+    this.collisionSystem.setLaneTolerance(this.laneTolerance);
+  }
+
+  public getLaneTolerance(): number {
+    return this.laneTolerance;
+  }
+
+  public setQualityMode(mode: QualityMode): void {
+    this.qualityMode = mode;
+    const scale = this.resolveQualityScale(mode);
+    this.particleSystem.setQualityScale(scale);
+    this.playerTrailEffect.setQualityScale(scale);
+    this.musicVisualizerBackground.setQualityScale(scale);
+    this.frequencySideRailsEffect.setQualityScale(scale);
+  }
+
+  public getQualityMode(): QualityMode {
+    return this.qualityMode;
   }
 
   private regenerateBeatMap(): void {
@@ -348,4 +411,27 @@ export class Game {
     this.cameraController.update(time.deltaTime, this.cameraShake);
     this.renderer.render();
   };
+
+  private resolveQualityScale(mode: QualityMode): number {
+    if (mode === "high") {
+      return 1;
+    }
+    if (mode === "medium") {
+      return 0.64;
+    }
+    if (mode === "low") {
+      return 0.38;
+    }
+
+    const nav = window.navigator as Navigator & { deviceMemory?: number };
+    const memory = nav.deviceMemory ?? 8;
+    const cores = nav.hardwareConcurrency ?? 8;
+    if (memory <= 2 || cores <= 2) {
+      return 0.38;
+    }
+    if (memory <= 4 || cores <= 4) {
+      return 0.64;
+    }
+    return 1;
+  }
 }

@@ -43,13 +43,15 @@
       }
 
       #hud.compact #perf,
-      #hud.compact #debug {
+      #hud.compact #debug,
+      #hud.compact #settings {
         display: none;
       }
 
       #hud-row,
       #stats,
-      #perf {
+      #perf,
+      #settings {
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
@@ -146,10 +148,32 @@
         <span id="score">Score: 0</span>
         <span id="combo">Combo: 0</span>
         <span id="max-combo">Max Combo: 0</span>
+        <span id="fever">Fever: 0%</span>
       </div>
       <div id="perf">
         <span id="accuracy">Accuracy: 0.0%</span>
         <span id="breakdown">P:0 G:0 g:0 M:0</span>
+      </div>
+      <div id="settings">
+        <label>
+          Quality
+          <select id="quality-mode">
+            <option value="auto" selected>Auto</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label>
+          FX
+          <input id="fx-intensity" type="range" min="30" max="200" step="1" value="100" />
+          <span id="fx-intensity-label">100%</span>
+        </label>
+        <label>
+          Lane Assist
+          <input id="lane-tolerance" type="range" min="30" max="120" step="1" value="55" />
+          <span id="lane-tolerance-label">55%</span>
+        </label>
       </div>
       <div id="debug">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
     </div>
@@ -164,6 +188,8 @@
       <span id="result-accuracy">Accuracy: 0.0%</span>
       <span id="result-max-combo">Max Combo: 0</span>
       <span id="result-breakdown">P:0 G:0 g:0 M:0</span>
+      <span id="result-types">Tap:0 Hold:0 Slide:0 Double:0 Mines:0</span>
+      <span id="result-tech">Hold C/B:0/0 Slide C/B:0/0</span>
     </div>
 
     <div id="app"></div>

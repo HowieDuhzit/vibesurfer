@@ -8,18 +8,22 @@ export type NoteType = "tap" | "hold" | "double" | "slide" | "mine";
 
 export class Note extends Entity {
   public lane = 1;
+  public slideToLane = 1;
   public zPosition = -SPAWN_DISTANCE;
   public type: NoteType = "tap";
+  public duration = 0;
   public active = false;
 
   public constructor(public readonly instanceId: number) {
     super(new THREE.Object3D());
   }
 
-  public spawn(lane: number, type: NoteType = "tap"): void {
+  public spawn(lane: number, type: NoteType = "tap", duration = 0, slideToLane = lane): void {
     this.lane = lane;
+    this.slideToLane = slideToLane;
     this.zPosition = -SPAWN_DISTANCE;
     this.type = type;
+    this.duration = duration;
     this.active = true;
     this.mesh.position.set(laneX[lane] ?? 0, 0.55, this.zPosition);
   }

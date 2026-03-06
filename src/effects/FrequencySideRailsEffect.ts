@@ -8,6 +8,8 @@ export class FrequencySideRailsEffect {
   private readonly dummy = new THREE.Object3D();
   private readonly color = new THREE.Color();
   private scroll = 0;
+  private intensityScale = 1;
+  private qualityScale = 1;
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.BoxGeometry(0.14, 1, 0.22);
@@ -50,11 +52,22 @@ export class FrequencySideRailsEffect {
     const stepZ = spanZ / this.barsPerSide;
     const sideOffsetX = 4.35;
 
+    const stride = this.qualityScale >= 0.95 ? 1 : this.qualityScale >= 0.6 ? 2 : 3;
     for (let i = 0; i < this.barsPerSide; i += 1) {
       const z = -6 - i * stepZ;
       const bin = bins > 0 ? Math.min(bins - 1, Math.floor(((i + this.scroll) % this.barsPerSide) * (bins / this.barsPerSide))) : 0;
       const amp = bins > 0 ? (frequencyData as Uint8Array)[bin] / 255 : 0;
-      const h = 0.22 + amp * (6.2 + clampedBass * 2.4);
+      const h = 0.22 + amp * (6.2 + clampedBass * 2.4) * this.intensityScale;
+      if (i % stride !== 0) {
+        this.dummy.position.set(-sideOffsetX, -1000, z);
+        this.dummy.scale.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        this.leftMesh.setMatrixAt(i, this.dummy.matrix);
+        this.dummy.position.set(sideOffsetX, -1000, z);
+        this.dummy.updateMatrix();
+        this.rightMesh.setMatrixAt(i, this.dummy.matrix);
+        continue;
+      }
 
       this.dummy.position.set(-sideOffsetX, h * 0.5, z);
       this.dummy.rotation.set(0, 0, 0);
@@ -73,6 +86,14 @@ export class FrequencySideRailsEffect {
     const material = this.leftMesh.material as THREE.MeshStandardMaterial;
     material.color.copy(this.color);
     material.emissive.copy(this.color);
-    material.emissiveIntensity = 0.85 + clampedEnergy * 1.6;
+    material.emissiveIntensity = (0.85 + clampedEnergy * 1.6) * this.intensityScale;
+  }
+
+  public setIntensity(scale: number): void {
+    this.intensityScale = Math.max(0.3, Math.min(2, scale));
+  }
+
+  public setQualityScale(scale: number): void {
+    this.qualityScale = Math.max(0.25, Math.min(1, scale));
   }
 }

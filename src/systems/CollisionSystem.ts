@@ -1,4 +1,4 @@
-import { HIT_LINE_Z_OFFSET, HIT_WINDOW } from "../core/Config";
+import { HIT_LINE_Z_OFFSET, HIT_WINDOW, LANE_WIDTH } from "../core/Config";
 import { NoteType } from "../entities/Note";
 import { Player } from "../entities/Player";
 import { NoteSpawner } from "../world/NoteSpawner";
@@ -6,12 +6,28 @@ import { ScoreSystem } from "./ScoreSystem";
 
 export type HitJudgment = "perfect" | "great" | "good";
 
+interface ActiveHold {
+  lane: number;
+  remaining: number;
+  grace: number;
+}
+
+interface ActiveSlide {
+  fromLane: number;
+  toLane: number;
+  remaining: number;
+  requiredDirection: number;
+}
+
 export class CollisionSystem {
-  private readonly laneTolerance = 0.55;
+  private laneTolerance = 0.55;
   private perfectDistance = HIT_WINDOW * 0.2;
   private greatDistance = HIT_WINDOW * 0.38;
   private goodDistance = HIT_WINDOW * 0.6;
   private previousPlayerX = 0;
+
+  private readonly activeHolds: ActiveHold[] = [];
+  private readonly activeSlides: ActiveSlide[] = [];
 
   public constructor(
     private readonly player: Player,
@@ -28,12 +44,20 @@ export class CollisionSystem {
     this.goodDistance = clamped * 0.6;
   }
 
+  public setLaneTolerance(tolerance: number): void {
+    this.laneTolerance = Math.max(0.3, Math.min(1.2, tolerance));
+  }
+
   public update(deltaTime: number): void {
-    const activeIds = this.noteSpawner.getActiveInstanceIds();
     const playerHitZ = this.player.getZ() + HIT_LINE_Z_OFFSET;
     const playerX = this.player.position.x;
     const playerLateralSpeed = (playerX - this.previousPlayerX) / Math.max(1e-4, deltaTime);
     this.previousPlayerX = playerX;
+
+    this.updateActiveHolds(deltaTime, playerX);
+    this.updateActiveSlides(deltaTime, playerX, playerLateralSpeed);
+
+    const activeIds = this.noteSpawner.getActiveInstanceIds();
 
     for (let i = activeIds.length - 1; i >= 0; i -= 1) {
       const note = this.noteSpawner.getNoteByInstanceId(activeIds[i]);
@@ -49,6 +73,27 @@ export class CollisionSystem {
 
       const judgment = this.getJudgment(distance);
       if (laneAligned && judgment && note.type !== "mine") {
+        if (note.type === "hold") {
+          this.scoreSystem.onNoteCollected(judgment, "hold", distance <= this.greatDistance);
+          this.activeHolds.push({ lane: note.lane, remaining: Math.max(0.14, note.duration), grace: 0.12 });
+          this.onCollected(note.mesh.position.x, note.mesh.position.y, note.mesh.position.z, note.lane, judgment);
+          this.noteSpawner.deactivateNote(note);
+          continue;
+        }
+
+        if (note.type === "slide") {
+          this.scoreSystem.onNoteCollected(judgment, "slide", false);
+          this.activeSlides.push({
+            fromLane: note.lane,
+            toLane: note.slideToLane,
+            remaining: Math.max(0.14, note.duration),
+            requiredDirection: Math.sign(note.slideToLane - note.lane)
+          });
+          this.onCollected(note.mesh.position.x, note.mesh.position.y, note.mesh.position.z, note.lane, judgment);
+          this.noteSpawner.deactivateNote(note);
+          continue;
+        }
+
         const expressive = this.isExpressiveHit(note.type, distance, playerLateralSpeed);
         this.scoreSystem.onNoteCollected(judgment, note.type, expressive);
         this.onCollected(note.mesh.position.x, note.mesh.position.y, note.mesh.position.z, note.lane, judgment);
@@ -61,6 +106,56 @@ export class CollisionSystem {
         this.noteSpawner.deactivateNote(note);
       }
     }
+  }
+
+  private updateActiveHolds(deltaTime: number, playerX: number): void {
+    for (let i = this.activeHolds.length - 1; i >= 0; i -= 1) {
+      const hold = this.activeHolds[i];
+      const laneX = this.laneToX(hold.lane);
+      const aligned = Math.abs(playerX - laneX) <= this.laneTolerance;
+
+      hold.remaining -= deltaTime;
+      if (aligned) {
+        hold.grace = Math.min(0.12, hold.grace + deltaTime * 0.5);
+      } else {
+        hold.grace -= deltaTime;
+      }
+
+      if (hold.remaining <= 0) {
+        this.scoreSystem.onHoldCompleted();
+        this.activeHolds.splice(i, 1);
+        continue;
+      }
+
+      if (hold.grace <= 0) {
+        this.scoreSystem.onHoldBroken();
+        this.activeHolds.splice(i, 1);
+      }
+    }
+  }
+
+  private updateActiveSlides(deltaTime: number, playerX: number, playerLateralSpeed: number): void {
+    for (let i = this.activeSlides.length - 1; i >= 0; i -= 1) {
+      const slide = this.activeSlides[i];
+      const targetX = this.laneToX(slide.toLane);
+      const directionOk = Math.sign(playerLateralSpeed) === slide.requiredDirection || Math.abs(playerLateralSpeed) < 0.25;
+
+      slide.remaining -= deltaTime;
+      if (Math.abs(playerX - targetX) <= this.laneTolerance && directionOk) {
+        this.scoreSystem.onSlideCompleted();
+        this.activeSlides.splice(i, 1);
+        continue;
+      }
+
+      if (slide.remaining <= 0) {
+        this.scoreSystem.onSlideBroken();
+        this.activeSlides.splice(i, 1);
+      }
+    }
+  }
+
+  private laneToX(lane: number): number {
+    return (lane - 1) * LANE_WIDTH;
   }
 
   private getJudgment(distance: number): HitJudgment | null {

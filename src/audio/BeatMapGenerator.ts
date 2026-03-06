@@ -1,6 +1,6 @@
 import { FFT_SIZE, HIT_LINE_Z_OFFSET, LANES, SPAWN_DISTANCE, TRACK_SPEED } from "../core/Config";
-import { BeatEvent } from "./BeatDetector";
 import { NoteType } from "../entities/Note";
+import { BeatEvent } from "./BeatDetector";
 
 export interface SpawnEvent {
   spawnTime: number;
@@ -8,6 +8,8 @@ export interface SpawnEvent {
   lane: number;
   bassEnergy: number;
   type: NoteType;
+  duration: number;
+  slideToLane: number;
 }
 
 export interface BeatMarkerEvent {
@@ -50,13 +52,7 @@ export class BeatMapGenerator {
 
     const mono = this.mixToMono(buffer);
     const analysis = this.analyzeFrames(mono, sampleRate);
-
-    const candidates = this.extractOnsetCandidates(
-      analysis.flux,
-      analysis.rmsDb,
-      sampleRate,
-      travelTime
-    );
+    const candidates = this.extractOnsetCandidates(analysis.flux, analysis.rmsDb, sampleRate, travelTime);
 
     if (candidates.length === 0) {
       this.generateFallbackGrid(buffer.duration);
@@ -64,20 +60,17 @@ export class BeatMapGenerator {
     }
 
     const periodFrames = this.estimateBeatPeriodFrames(analysis.flux, sampleRate);
-    const beatCandidates = this.trackBeatPath(candidates, periodFrames);
-    this.buildBeatMarkerGrid(beatCandidates, periodFrames, sampleRate, buffer.duration, travelTime);
-    let selectedFrames = this.expandWithOffbeats(
-      beatCandidates,
-      candidates,
-      periodFrames,
-      sampleRate,
-      buffer.duration
-    );
+    const beatPath = this.trackBeatPath(candidates, periodFrames);
+    this.buildBeatMarkerGrid(beatPath, periodFrames, sampleRate, buffer.duration, travelTime);
 
-    selectedFrames = this.densifyFrames(
+    let selectedFrames = this.expandWithOffbeats(beatPath, candidates, periodFrames, sampleRate, buffer.duration);
+    selectedFrames = this.densifyFrames(selectedFrames, candidates, periodFrames, sampleRate, buffer.duration);
+    selectedFrames = this.quantizeFrames(
       selectedFrames,
-      candidates,
+      beatPath.length > 0 ? beatPath[0].frame : selectedFrames[0] ?? 0,
       periodFrames,
+      this.difficulty === "hyper" ? 4 : this.difficulty === "normal" ? 2 : 1,
+      analysis.rmsDb,
       sampleRate,
       buffer.duration
     );
@@ -103,7 +96,6 @@ export class BeatMapGenerator {
       if (beatTime < travelTime || beatTime - lastTime < this.minNoteGapSeconds) {
         continue;
       }
-
       if (analysis.rmsDb[frame] < this.silenceFloorDb) {
         continue;
       }
@@ -118,7 +110,6 @@ export class BeatMapGenerator {
         prevLane,
         repeatCount
       );
-
       prevLane = laneResult.lane;
       repeatCount = laneResult.repeatCount;
       lastTime = beatTime;
@@ -132,16 +123,42 @@ export class BeatMapGenerator {
         analysis.highBand[frame],
         lowMean,
         midMean,
-        highMean
+        highMean,
+        analysis.rmsDb[frame]
       );
+      const duration = this.pickDuration(type, periodFrames, sampleRate);
+      const slideToLane = type === "slide" ? this.pickSlideTargetLane(laneResult.lane) : laneResult.lane;
+
       this.queue.push({
         spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
         beatTime: beatTime + this.timingOffsetSeconds,
         lane: laneResult.lane,
         bassEnergy,
-        type
+        type,
+        duration,
+        slideToLane
       });
+
+      // Double notes are explicit quick follow-up taps, never simultaneous.
+      if (type === "double") {
+        const gap = this.difficulty === "hyper" ? 0.12 : this.difficulty === "chill" ? 0.19 : 0.15;
+        const echoBeatTime = beatTime + gap;
+        if (echoBeatTime < buffer.duration) {
+          const echoLane = this.pickEchoLane(laneResult.lane);
+          this.queue.push({
+            spawnTime: echoBeatTime - travelTime + this.timingOffsetSeconds,
+            beatTime: echoBeatTime + this.timingOffsetSeconds,
+            lane: echoLane,
+            bassEnergy: Math.max(24, Math.floor(bassEnergy * 0.86)),
+            type: "tap",
+            duration: 0,
+            slideToLane: echoLane
+          });
+        }
+      }
     }
+
+    this.queue.sort((a, b) => a.spawnTime - b.spawnTime);
 
     if (this.queue.length === 0) {
       this.generateFallbackGrid(buffer.duration);
@@ -150,12 +167,15 @@ export class BeatMapGenerator {
 
   public addBeat(beat: BeatEvent): void {
     const travelTime = (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED;
+    const lane = this.nextLane();
     this.queue.push({
       spawnTime: beat.timestamp - travelTime,
       beatTime: beat.timestamp,
-      lane: this.nextLane(),
+      lane,
       bassEnergy: beat.bassEnergy,
-      type: "tap"
+      type: "tap",
+      duration: 0,
+      slideToLane: lane
     });
   }
 
@@ -264,7 +284,6 @@ export class BeatMapGenerator {
     }
 
     this.smooth3(flux);
-
     return { flux, rmsDb, lowBand, midBand, highBand };
   }
 
@@ -408,32 +427,30 @@ export class BeatMapGenerator {
       used.add(beatPath[i].frame);
     }
 
-    const beatSpacing = periodFrames;
-    const offbeatWindow = Math.max(2, Math.floor(beatSpacing * 0.18));
-    const minOffbeatStrength = this.percentile(candidates.map((c) => c.strength), 0.74);
+    if (this.difficulty !== "chill") {
+      const offbeatWindow = Math.max(2, Math.floor(periodFrames * 0.18));
+      const minOffbeatStrength = this.percentile(candidates.map((c) => c.strength), this.difficulty === "hyper" ? 0.66 : 0.74);
 
-    for (let i = 0; i < beatPath.length - 1; i += 1) {
-      const left = beatPath[i].frame;
-      const right = beatPath[i + 1].frame;
-      const mid = Math.floor((left + right) * 0.5);
+      for (let i = 0; i < beatPath.length - 1; i += 1) {
+        const left = beatPath[i].frame;
+        const right = beatPath[i + 1].frame;
+        const mid = Math.floor((left + right) * 0.5);
 
-      let best: Candidate | null = null;
-      for (let f = mid - offbeatWindow; f <= mid + offbeatWindow; f += 1) {
-        const c = candidateByFrame.get(f);
-        if (!c || used.has(c.frame)) {
-          continue;
+        let best: Candidate | null = null;
+        for (let f = mid - offbeatWindow; f <= mid + offbeatWindow; f += 1) {
+          const c = candidateByFrame.get(f);
+          if (!c || used.has(c.frame) || c.strength < minOffbeatStrength) {
+            continue;
+          }
+          if (best === null || c.strength > best.strength) {
+            best = c;
+          }
         }
-        if (c.strength < minOffbeatStrength) {
-          continue;
-        }
-        if (best === null || c.strength > best.strength) {
-          best = c;
-        }
-      }
 
-      if (best) {
-        outFrames.push(best.frame);
-        used.add(best.frame);
+        if (best) {
+          outFrames.push(best.frame);
+          used.add(best.frame);
+        }
       }
     }
 
@@ -443,10 +460,7 @@ export class BeatMapGenerator {
     let lastTime = -Infinity;
     for (let i = 0; i < outFrames.length; i += 1) {
       const t = this.frameToTime(outFrames[i], sampleRate);
-      if (t < 0 || t > durationSeconds) {
-        continue;
-      }
-      if (t - lastTime < this.minNoteGapSeconds) {
+      if (t < 0 || t > durationSeconds || t - lastTime < this.minNoteGapSeconds) {
         continue;
       }
       filtered.push(outFrames[i]);
@@ -468,8 +482,8 @@ export class BeatMapGenerator {
     }
 
     const beatPeriodSeconds = (periodFrames * this.hopSize) / sampleRate;
-    const difficultyMult = this.difficulty === "chill" ? 0.8 : this.difficulty === "hyper" ? 1.35 : 1;
-    const targetNps = Math.max(1.4, Math.min(4.2, (1 / Math.max(0.2, beatPeriodSeconds)) * 1.35 * difficultyMult));
+    const difficultyMult = this.difficulty === "chill" ? 0.72 : this.difficulty === "hyper" ? 1.45 : 1;
+    const targetNps = Math.max(1.25, Math.min(4.6, (1 / Math.max(0.2, beatPeriodSeconds)) * 1.28 * difficultyMult));
     const targetCount = Math.floor(durationSeconds * targetNps);
 
     if (baseFrames.length >= targetCount) {
@@ -478,10 +492,7 @@ export class BeatMapGenerator {
 
     const out = baseFrames.slice();
     const used = new Set<number>(out);
-
-    const residual = candidates
-      .filter((c) => !used.has(c.frame))
-      .sort((a, b) => b.strength - a.strength);
+    const residual = candidates.filter((c) => !used.has(c.frame)).sort((a, b) => b.strength - a.strength);
 
     for (let i = 0; i < residual.length && out.length < targetCount; i += 1) {
       const frame = residual[i].frame;
@@ -496,12 +507,52 @@ export class BeatMapGenerator {
         }
       }
 
-      if (tooClose) {
+      if (!tooClose) {
+        out.push(frame);
+        used.add(frame);
+      }
+    }
+
+    out.sort((a, b) => a - b);
+    return out;
+  }
+
+  private quantizeFrames(
+    frames: number[],
+    anchorFrame: number,
+    periodFrames: number,
+    subdivision: number,
+    rmsDb: Float32Array,
+    sampleRate: number,
+    durationSeconds: number
+  ): number[] {
+    if (frames.length === 0) {
+      return frames;
+    }
+
+    const quantStep = Math.max(1, periodFrames / Math.max(1, subdivision));
+    const out: number[] = [];
+    const used = new Set<number>();
+    let lastTime = -Infinity;
+
+    for (let i = 0; i < frames.length; i += 1) {
+      const snapped = Math.round((frames[i] - anchorFrame) / quantStep) * quantStep + anchorFrame;
+      const frame = Math.max(0, Math.min(rmsDb.length - 1, Math.round(snapped)));
+      const t = this.frameToTime(frame, sampleRate);
+
+      if (t < 0 || t >= durationSeconds || t - lastTime < this.minNoteGapSeconds) {
+        continue;
+      }
+      if (rmsDb[frame] < this.silenceFloorDb) {
+        continue;
+      }
+      if (used.has(frame)) {
         continue;
       }
 
-      out.push(frame);
       used.add(frame);
+      out.push(frame);
+      lastTime = t;
     }
 
     out.sort((a, b) => a - b);
@@ -536,8 +587,7 @@ export class BeatMapGenerator {
     if (lane === prevLane) {
       repeatCount += 1;
       if (repeatCount >= 2) {
-        const closeToMid = mn > best * 0.84;
-        if (closeToMid) {
+        if (mn > best * 0.84) {
           lane = 1;
         } else if (lane === 1) {
           lane = ln > hn ? 0 : 2;
@@ -554,7 +604,7 @@ export class BeatMapGenerator {
   }
 
   private frameToTime(frame: number, sampleRate: number): number {
-    return ((frame * this.hopSize) + this.frameSize * 0.5) / sampleRate;
+    return (frame * this.hopSize + this.frameSize * 0.5) / sampleRate;
   }
 
   private mixToMono(buffer: AudioBuffer): Float32Array {
@@ -591,21 +641,16 @@ export class BeatMapGenerator {
       }
     }
 
-    const medianInterval = intervals.length > 0
-      ? this.percentile(intervals, 0.5)
-      : Math.max(0.3, Math.min(0.9, intervalHint));
-
-    let beatIndex = 0;
-    let lastAcceptedTime = -Infinity;
+    const medianInterval = intervals.length > 0 ? this.percentile(intervals, 0.5) : Math.max(0.3, Math.min(0.9, intervalHint));
     const minMainBeatSpacing = medianInterval * 0.75;
 
+    let beatIndex = 0;
+    let lastAccepted = -Infinity;
     for (let i = 0; i < beatPath.length; i += 1) {
       const beatTime = beatPath[i].time;
-
-      if (beatTime - lastAcceptedTime < minMainBeatSpacing) {
+      if (beatTime - lastAccepted < minMainBeatSpacing) {
         continue;
       }
-
       if (beatTime < travelTime || beatTime >= durationSeconds) {
         continue;
       }
@@ -616,7 +661,7 @@ export class BeatMapGenerator {
         isBarLine: beatIndex % 4 === 0
       });
 
-      lastAcceptedTime = beatTime;
+      lastAccepted = beatTime;
       beatIndex += 1;
     }
   }
@@ -625,14 +670,15 @@ export class BeatMapGenerator {
     const beatInterval = 0.5;
     let lane = 0;
     let beatIndex = 0;
-
     for (let beatTime = 0.5; beatTime < durationSeconds; beatTime += beatInterval) {
       this.queue.push({
         spawnTime: beatTime - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED,
         beatTime,
         lane,
         bassEnergy: 96,
-        type: "tap"
+        type: "tap",
+        duration: 0,
+        slideToLane: lane
       });
       this.beatMarkerQueue.push({
         spawnTime: beatTime - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED,
@@ -670,7 +716,6 @@ export class BeatMapGenerator {
     if (values.length === 0) {
       return 0;
     }
-
     const copy = Array.from(values);
     copy.sort((a, b) => a - b);
     const mid = Math.floor(copy.length / 2);
@@ -686,7 +731,6 @@ export class BeatMapGenerator {
     for (let i = 0; i < values.length; i += 1) {
       absDev[i] = Math.abs(values[i] - center);
     }
-
     return this.median(absDev);
   }
 
@@ -694,7 +738,6 @@ export class BeatMapGenerator {
     if (values.length === 0) {
       return 0;
     }
-
     const copy = values.slice().sort((a, b) => a - b);
     const idx = Math.max(0, Math.min(copy.length - 1, Math.floor(p * (copy.length - 1))));
     return copy[idx];
@@ -763,25 +806,58 @@ export class BeatMapGenerator {
     high: number,
     lowMean: number,
     midMean: number,
-    highMean: number
+    highMean: number,
+    rmsDb: number
   ): NoteType {
     const ln = low / Math.max(1e-6, lowMean);
     const mn = mid / Math.max(1e-6, midMean);
     const hn = high / Math.max(1e-6, highMean);
     const r = this.nextRandom();
+    const sectionQuiet = rmsDb < this.silenceFloorDb + 6;
 
     if (this.difficulty === "hyper" && strength > 1.4 && r < 0.06) {
       return "mine";
     }
-    if (strength > 1.26 && ln > Math.max(mn, hn) * 1.05 && r < 0.22) {
+    if (!sectionQuiet && strength > 1.26 && ln > Math.max(mn, hn) * 1.05 && r < (this.difficulty === "chill" ? 0.12 : 0.24)) {
       return "hold";
     }
-    if (strength > 1.16 && hn > mn * 1.06 && r < 0.2) {
+    if (!sectionQuiet && strength > 1.16 && hn > mn * 1.06 && r < (this.difficulty === "chill" ? 0.08 : 0.2)) {
       return "slide";
     }
-    if (this.difficulty !== "chill" && strength > 1.22 && r < 0.16) {
+    if (this.difficulty !== "chill" && strength > 1.22 && r < (this.difficulty === "hyper" ? 0.18 : 0.12)) {
       return "double";
     }
     return "tap";
+  }
+
+  private pickDuration(type: NoteType, periodFrames: number, sampleRate: number): number {
+    const beatSeconds = (periodFrames * this.hopSize) / sampleRate;
+    if (type === "hold") {
+      return Math.max(0.24, Math.min(0.75, beatSeconds * (this.difficulty === "hyper" ? 0.72 : 0.9)));
+    }
+    if (type === "slide") {
+      return Math.max(0.2, Math.min(0.62, beatSeconds * 0.72));
+    }
+    return 0;
+  }
+
+  private pickSlideTargetLane(lane: number): number {
+    if (lane <= 0) {
+      return 1;
+    }
+    if (lane >= LANES - 1) {
+      return LANES - 2;
+    }
+    return this.nextRandom() < 0.5 ? lane - 1 : lane + 1;
+  }
+
+  private pickEchoLane(lane: number): number {
+    if (lane <= 0) {
+      return 1;
+    }
+    if (lane >= LANES - 1) {
+      return LANES - 2;
+    }
+    return this.nextRandom() < 0.5 ? lane - 1 : lane + 1;
   }
 }

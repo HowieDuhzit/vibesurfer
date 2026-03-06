@@ -22,6 +22,8 @@ export class ParticleSystem {
   private readonly dummy = new THREE.Object3D();
 
   private rngState = 987654321;
+  private intensityScale = 1;
+  private qualityScale = 1;
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.SphereGeometry(0.09, 6, 6);
@@ -47,7 +49,7 @@ export class ParticleSystem {
   }
 
   public emitBurst(x: number, y: number, z: number, lane: number): void {
-    const count = 14;
+    const count = Math.max(3, Math.floor(14 * this.intensityScale * this.qualityScale));
     const lateralBias = lane - 1;
 
     for (let i = 0; i < count; i += 1) {
@@ -102,6 +104,14 @@ export class ParticleSystem {
     }
 
     this.mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  public setIntensity(scale: number): void {
+    this.intensityScale = Math.max(0.3, Math.min(2, scale));
+  }
+
+  public setQualityScale(scale: number): void {
+    this.qualityScale = Math.max(0.25, Math.min(1, scale));
   }
 
   private writeMatrix(index: number, scale: number): void {
