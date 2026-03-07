@@ -179,7 +179,7 @@ export class Track {
       }
       const distanceAhead = Math.max(0, Math.min(this.totalLength, -segment.zPosition + SEGMENT_LENGTH * 0.5));
       const u = distanceAhead / this.totalLength;
-      const damp = this.smoothstep(0.08, 1, u);
+      const damp = 0.5 + 0.5 * this.smoothstep(0.08, 1, u);
       const phase = (u * (1.1 + this.pace * 0.9) + this.waveTime * (0.08 + this.pace * 0.09)) * Math.PI * 2;
       const roll = this.bank * (0.18 + damp * 0.85) + Math.sin(phase * 0.75) * this.curve * 0.04 * damp;
 
@@ -283,8 +283,9 @@ export class Track {
     const points = this.centerlinePoints;
     for (let i = 0; i < points.length; i += 1) {
       const u = i / (points.length - 1);
-      const damp = this.smoothstep(0.03, 1, u);
-      const laneSafeDamp = this.smoothstep(0.18, 1, u);
+      // Keep the ride shape alive near the player instead of flattening out.
+      const damp = 0.55 + 0.45 * this.smoothstep(0.03, 1, u);
+      const laneSafeDamp = 0.52 + 0.48 * this.smoothstep(0.18, 1, u);
       const phase = (u * (1.25 + this.pace * 1.4) + this.waveTime * (0.12 + this.pace * 0.11)) * Math.PI * 2;
       const phase2 = phase * 0.72 + 0.8;
 
