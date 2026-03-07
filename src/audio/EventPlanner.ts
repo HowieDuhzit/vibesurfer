@@ -1,6 +1,6 @@
 import { LANES } from "../core/Config";
 import { NoteType } from "../entities/Note";
-import { RhythmAnalysis, SongAnalysis, StructureAnalysis, TrackPlan } from "./AnalysisTypes";
+import { RhythmAnalysis, SongAnalysis, SongSection, StructureAnalysis, TrackPlan } from "./AnalysisTypes";
 import { SpawnEvent } from "./BeatMapGenerator";
 
 interface EventPlannerOptions {
@@ -16,6 +16,12 @@ interface Candidate {
   time: number;
   strength: number;
   isBeat: boolean;
+}
+
+interface SectionProfile {
+  spawnBias: number;
+  featureBias: number;
+  restBias: number;
 }
 
 export class EventPlanner {
@@ -39,6 +45,8 @@ export class EventPlanner {
     const candidates = this.buildCandidates(song, rhythm, track);
     const laneCounts = [0, 0, 0];
     const events: SpawnEvent[] = [];
+    const sectionByFrame = this.makeSectionLookup(song.frames.length, structure.sections);
+    const sectionCounts = [0, 0, 0, 0, 0];
 
     let prevLane = 1;
     let lastBeatTime = -Infinity;
@@ -64,12 +72,15 @@ export class EventPlanner {
       const novelty = structure.noveltyEnvelope[frame] ?? 0;
       const feature = track.featureEligibility[frame] ?? 0;
       const loudEnough = song.frames[frame].rmsDb > -44;
+      const sectionLabel = sectionByFrame[frame];
+      const profile = this.profileForSection(sectionLabel);
+      const anchorBoost = this.anchorBoost(frame, track.anchorFrames, rhythm.beatPeriodFrames);
 
       if (!loudEnough || energy < 0.08) {
         continue;
       }
 
-      const spawnChance = this.spawnChance(c, density, danger, novelty, options.difficulty);
+      const spawnChance = this.spawnChance(c, density, danger, novelty, options.difficulty, profile, anchorBoost);
       if (nextRandom() > spawnChance) {
         continue;
       }
@@ -79,7 +90,7 @@ export class EventPlanner {
         continue;
       }
 
-      const type = this.pickType(c.strength, density, feature, options.difficulty, nextRandom);
+      const type = this.pickType(c.strength, density, feature + profile.featureBias + anchorBoost * 0.15, options.difficulty, nextRandom);
       const duration = this.pickDuration(type, beatSeconds, options.difficulty, nextRandom);
       const slideToLane = type === "slide" ? this.pickSlideTarget(lane, nextRandom) : lane;
       const bassEnergy = this.computeBassEnergy(song, frame);
@@ -95,6 +106,7 @@ export class EventPlanner {
       });
 
       laneCounts[lane] += 1;
+      sectionCounts[this.sectionLabelIndex(sectionLabel)] += 1;
       prevLane = lane;
       lastBeatTime = beatTime;
 
@@ -113,6 +125,7 @@ export class EventPlanner {
             slideToLane: echoLane
           });
           laneCounts[echoLane] += 1;
+          sectionCounts[this.sectionLabelIndex(sectionLabel)] += 1;
           prevLane = echoLane;
           lastBeatTime = echoTime;
         }
@@ -121,7 +134,7 @@ export class EventPlanner {
 
     events.sort((a, b) => a.beatTime - b.beatTime);
     const playable = this.playabilityPass(events, options.minGapSeconds, beatSeconds);
-    return this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom);
+    return this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom, sectionByFrame, sectionCounts);
   }
 
   private buildCandidates(song: SongAnalysis, rhythm: RhythmAnalysis, track: TrackPlan): Candidate[] {
@@ -171,11 +184,13 @@ export class EventPlanner {
     density: number,
     danger: number,
     novelty: number,
-    difficulty: "chill" | "normal" | "hyper"
+    difficulty: "chill" | "normal" | "hyper",
+    profile: SectionProfile,
+    anchorBoost: number
   ): number {
     const base = candidate.isBeat ? 0.62 : 0.34;
     const diff = difficulty === "hyper" ? 0.2 : difficulty === "chill" ? -0.16 : 0;
-    const chance = base + density * 0.35 + danger * 0.2 + novelty * 0.16 + diff;
+    const chance = base + density * 0.35 + danger * 0.2 + novelty * 0.16 + diff + profile.spawnBias + anchorBoost * 0.15;
     return Math.max(0.06, Math.min(0.95, chance));
   }
 
@@ -324,7 +339,9 @@ export class EventPlanner {
     events: SpawnEvent[],
     duration: number,
     difficulty: "chill" | "normal" | "hyper",
-    nextRandom: () => number
+    nextRandom: () => number,
+    sectionByFrame: Int8Array,
+    sectionCounts: readonly number[]
   ): SpawnEvent[] {
     if (events.length <= 3 || duration <= 0.5) {
       return events;
@@ -375,13 +392,18 @@ export class EventPlanner {
           filtered.push(sorted[i]);
         }
       }
-      return this.injectRests(filtered, difficulty);
+      return this.injectRests(filtered, difficulty, sectionByFrame, sectionCounts);
     }
 
-    return this.injectRests(sorted, difficulty);
+    return this.injectRests(sorted, difficulty, sectionByFrame, sectionCounts);
   }
 
-  private injectRests(events: SpawnEvent[], difficulty: "chill" | "normal" | "hyper"): SpawnEvent[] {
+  private injectRests(
+    events: SpawnEvent[],
+    difficulty: "chill" | "normal" | "hyper",
+    sectionByFrame: Int8Array,
+    sectionCounts: readonly number[]
+  ): SpawnEvent[] {
     if (events.length <= 8) {
       return events;
     }
@@ -390,19 +412,115 @@ export class EventPlanner {
     const restEvery = difficulty === "hyper" ? 20 : difficulty === "chill" ? 12 : 16;
     const restDuration = difficulty === "hyper" ? 0.48 : 0.62;
     let lastAccepted = -Infinity;
+    let acceptedInSection = 0;
+    let currentSection = -1;
 
     for (let i = 0; i < events.length; i += 1) {
       const e = events[i];
+      const section = this.resolveSectionForTime(
+        e.beatTime,
+        sectionByFrame,
+        events[events.length - 1].beatTime
+      );
+      if (section !== currentSection) {
+        currentSection = section;
+        acceptedInSection = 0;
+      }
+      const sectionLoad = section >= 0 && section < sectionCounts.length ? sectionCounts[section] : 0;
+      const heavySection = sectionLoad > 30;
+      const dynamicRestEvery = heavySection ? Math.max(8, restEvery - 4) : restEvery;
+      const shouldRest = (i > 0 && i % dynamicRestEvery === 0) || acceptedInSection >= (heavySection ? 14 : 22);
       if (i > 0 && i % restEvery === 0) {
         if (e.beatTime - lastAccepted < restDuration) {
           continue;
         }
       }
+      if (shouldRest && e.beatTime - lastAccepted < restDuration) {
+        continue;
+      }
       out.push(e);
       lastAccepted = e.beatTime;
+      acceptedInSection += 1;
     }
 
     return out;
+  }
+
+  private makeSectionLookup(frameCount: number, sections: readonly SongSection[]): Int8Array {
+    const lookup = new Int8Array(frameCount);
+    for (let i = 0; i < lookup.length; i += 1) {
+      lookup[i] = 1;
+    }
+    for (let i = 0; i < sections.length; i += 1) {
+      const label = this.sectionLabelIndex(sections[i].label);
+      const lo = Math.max(0, sections[i].startFrame);
+      const hi = Math.min(frameCount - 1, sections[i].endFrame);
+      for (let f = lo; f <= hi; f += 1) {
+        lookup[f] = label;
+      }
+    }
+    return lookup;
+  }
+
+  private profileForSection(labelIdx: number): SectionProfile {
+    if (labelIdx === 0) {
+      return { spawnBias: -0.22, featureBias: -0.16, restBias: 0.24 };
+    }
+    if (labelIdx === 2) {
+      return { spawnBias: 0.08, featureBias: 0.1, restBias: -0.08 };
+    }
+    if (labelIdx === 3) {
+      return { spawnBias: 0.14, featureBias: 0.16, restBias: -0.12 };
+    }
+    if (labelIdx === 4) {
+      return { spawnBias: -0.16, featureBias: -0.12, restBias: 0.16 };
+    }
+    return { spawnBias: 0, featureBias: 0, restBias: 0 };
+  }
+
+  private anchorBoost(frame: number, anchors: readonly number[], beatPeriodFrames: number): number {
+    if (anchors.length === 0) {
+      return 0;
+    }
+    const window = Math.max(6, beatPeriodFrames * 2);
+    let best = 0;
+    for (let i = 0; i < anchors.length; i += 1) {
+      const d = Math.abs(anchors[i] - frame);
+      if (d > window) {
+        continue;
+      }
+      const n = 1 - d / window;
+      best = Math.max(best, n * n);
+    }
+    return best;
+  }
+
+  private sectionLabelIndex(label: number | string): number {
+    if (typeof label === "number") {
+      return Math.max(0, Math.min(4, label | 0));
+    }
+    if (label === "intro") {
+      return 0;
+    }
+    if (label === "verse") {
+      return 1;
+    }
+    if (label === "chorus") {
+      return 2;
+    }
+    if (label === "breakdown") {
+      return 3;
+    }
+    return 4;
+  }
+
+  private resolveSectionForTime(beatTime: number, sectionByFrame: Int8Array, duration: number): number {
+    if (sectionByFrame.length <= 1) {
+      return 1;
+    }
+    const normalized = Math.max(0, Math.min(0.9999, beatTime / Math.max(1e-6, duration)));
+    const frame = Math.max(0, Math.min(sectionByFrame.length - 1, Math.floor(normalized * sectionByFrame.length)));
+    return sectionByFrame[frame];
   }
 
   private clampFrame(frame: number, length: number): number {
