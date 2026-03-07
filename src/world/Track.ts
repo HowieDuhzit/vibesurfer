@@ -13,6 +13,13 @@ export class Track {
   private readonly railMaterial: THREE.MeshPhysicalMaterial;
   private readonly edgeGlowMaterial: THREE.MeshPhysicalMaterial;
   private readonly tempColor = new THREE.Color();
+  private readonly centerlineCurve: THREE.CatmullRomCurve3;
+  private readonly centerlinePoints: THREE.Vector3[];
+  private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
+  private readonly tempPoint = new THREE.Vector3();
+  private readonly tempTangent = new THREE.Vector3();
+  private readonly tempQuat = new THREE.Quaternion();
+  private readonly tempRollQuat = new THREE.Quaternion();
 
   private readonly rails: THREE.Mesh[] = [];
   private readonly edgeGlows: THREE.Mesh[] = [];
@@ -86,6 +93,13 @@ export class Track {
       opacity: 0.8
     });
 
+    this.centerlinePoints = new Array(18);
+    for (let i = 0; i < this.centerlinePoints.length; i += 1) {
+      const u = i / (this.centerlinePoints.length - 1);
+      this.centerlinePoints[i] = new THREE.Vector3(0, 0, -u * this.totalLength);
+    }
+    this.centerlineCurve = new THREE.CatmullRomCurve3(this.centerlinePoints, false, "centripetal", 0.5);
+
     const segmentRoadGeometry = new THREE.PlaneGeometry(width, SEGMENT_LENGTH * 1.06);
     const lineGeometry = new THREE.BoxGeometry(0.08, 0.05, SEGMENT_LENGTH * 0.96);
     const shoulderWidth = 1.68;
@@ -155,6 +169,7 @@ export class Track {
     this.forwardLean += (this.targetForwardLean - this.forwardLean) * smoothing;
     this.curve += (this.targetCurve - this.curve) * smoothing;
     this.pace += (this.targetPace - this.pace) * smoothing;
+    this.refreshCenterlineSpline();
 
     for (let i = 0; i < this.segments.length; i += 1) {
       const segment = this.segments[i];
@@ -162,21 +177,24 @@ export class Track {
       if (segment.zPosition > SEGMENT_LENGTH) {
         segment.zPosition -= this.totalLength;
       }
+      const distanceAhead = Math.max(0, Math.min(this.totalLength, -segment.zPosition + SEGMENT_LENGTH * 0.5));
+      const u = distanceAhead / this.totalLength;
+      const damp = this.smoothstep(0.08, 1, u);
+      const phase = (u * (1.1 + this.pace * 0.9) + this.waveTime * (0.08 + this.pace * 0.09)) * Math.PI * 2;
+      const roll = this.bank * (0.18 + damp * 0.85) + Math.sin(phase * 0.75) * this.curve * 0.04 * damp;
 
-      // Keep lane readability near the hit zone by reducing deformation near z ~ 0
-      // and amplifying it farther ahead on the track.
-      const farNorm = Math.max(0, Math.min(1, -segment.zPosition / this.totalLength));
-      const laneReadabilityDamp = Math.max(0.08, farNorm * farNorm);
-      const flowU = (farNorm + this.waveTime * (0.1 + this.pace * 0.08)) * Math.PI * 2;
-      const flowV = flowU * 1.8 + i * 0.05;
+      this.centerlineCurve.getPointAt(u, this.tempPoint);
+      this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent);
+      if (this.tempTangent.lengthSq() < 1e-8) {
+        this.tempTangent.set(0, 0, -1);
+      } else {
+        this.tempTangent.normalize();
+      }
 
-      const lateral = Math.sin(flowU) * this.curve * (0.14 + laneReadabilityDamp * 1.18);
-      const lift = this.lift * (0.08 + laneReadabilityDamp * 0.84) + Math.sin(flowV) * this.lift * 0.12 * laneReadabilityDamp;
-      const bank = this.bank * (0.2 + laneReadabilityDamp * 0.9) + Math.sin(flowV * 0.72) * this.curve * 0.04 * laneReadabilityDamp;
-      const pitch = -Math.PI * 0.5 + this.forwardLean + Math.cos(flowU * 0.6) * this.lift * 0.04 * laneReadabilityDamp;
-
-      segment.mesh.position.set(lateral, lift, segment.zPosition);
-      segment.mesh.rotation.set(pitch, 0, bank);
+      this.tempQuat.setFromUnitVectors(this.forwardAxis, this.tempTangent);
+      this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
+      segment.mesh.position.copy(this.tempPoint);
+      segment.mesh.quaternion.copy(this.tempQuat).multiply(this.tempRollQuat);
     }
   }
 
@@ -259,5 +277,25 @@ export class Track {
     tex.repeat.set(1, SEGMENT_COUNT * 0.72);
     tex.anisotropy = 8;
     return tex;
+  }
+
+  private refreshCenterlineSpline(): void {
+    const points = this.centerlinePoints;
+    for (let i = 0; i < points.length; i += 1) {
+      const u = i / (points.length - 1);
+      const damp = this.smoothstep(0.1, 1, u);
+      const phase = (u * (1.25 + this.pace * 1.4) + this.waveTime * (0.12 + this.pace * 0.11)) * Math.PI * 2;
+      const phase2 = phase * 0.72 + 0.8;
+
+      const lateral = Math.sin(phase) * this.curve * (0.08 + damp * 1.35);
+      const lift = this.lift * (0.05 + damp * 0.95) + Math.sin(phase2) * this.lift * 0.16 * damp;
+      const z = -u * this.totalLength;
+      points[i].set(lateral, lift, z);
+    }
+  }
+
+  private smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(1e-6, edge1 - edge0)));
+    return t * t * (3 - 2 * t);
   }
 }
