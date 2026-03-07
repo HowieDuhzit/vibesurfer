@@ -17,6 +17,7 @@ export class Track {
   public readonly segments: TrackSegment[] = [];
 
   private readonly trackLength = 240;
+  private readonly frontPadding = 8;
   private readonly lengthSegments = 160;
   private readonly trackWidth = LANE_WIDTH * (LANES + 1);
   private readonly centerlineCurve: THREE.CatmullRomCurve3;
@@ -183,7 +184,7 @@ export class Track {
   }
 
   public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
-    const u = Math.max(0, Math.min(1, (-trackZ) / this.trackLength));
+    const u = Math.max(0, Math.min(1, (this.frontPadding - trackZ) / this.trackLength));
     this.centerlineCurve.getPointAt(u, this.tempCenter);
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.copy(this.tempCenter)
@@ -193,7 +194,7 @@ export class Track {
   }
 
   public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
-    const u = Math.max(0, Math.min(1, (-trackZ) / this.trackLength));
+    const u = Math.max(0, Math.min(1, (this.frontPadding - trackZ) / this.trackLength));
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
     this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
@@ -268,7 +269,7 @@ export class Track {
       const slope = this.forwardLean * u * this.trackLength * 0.1;
       const y = baseLift + hillA + hillB + drop + slope;
 
-      this.centerlinePoints[i].set(lateral, y, -u * this.trackLength);
+      this.centerlinePoints[i].set(lateral, y, this.frontPadding - u * this.trackLength);
     }
   }
 

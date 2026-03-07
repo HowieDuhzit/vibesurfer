@@ -8,15 +8,17 @@ export class Player extends Entity {
   public currentLane = 1;
   public targetLane = 1;
   public readonly position: THREE.Vector3;
+  private logicalLaneX = 0;
   private trackHeight = 0;
   private trackBank = 0;
   private trackPitch = 0;
-  private readonly baseY = 0.5;
+  private readonly logicalTrackZ = 0;
+  private readonly rideTarget = new THREE.Vector3(0, 0.5, 0);
 
   public constructor(mesh: THREE.Object3D) {
     super(mesh);
     this.position = mesh.position;
-    this.position.set(0, this.baseY, 0);
+    this.position.set(0, 0.5, this.logicalTrackZ);
   }
 
   public setTargetLane(lane: number): void {
@@ -25,16 +27,22 @@ export class Player extends Entity {
 
   public update(): void {
     const targetX = laneX[this.targetLane] ?? 0;
-    this.position.x += (targetX - this.position.x) * 0.2;
-    const targetY = this.baseY + this.trackHeight + Math.sin(this.trackBank) * Math.abs(this.position.x) * 0.05;
-    this.position.y += (targetY - this.position.y) * 0.24;
+    this.logicalLaneX += (targetX - this.logicalLaneX) * 0.2;
+
+    this.position.x += (this.rideTarget.x - this.position.x) * 0.32;
+    this.position.y += (this.rideTarget.y - this.position.y) * 0.28;
+    this.position.z += (this.rideTarget.z - this.position.z) * 0.3;
     this.mesh.rotation.z += (this.trackBank * 0.78 - this.mesh.rotation.z) * 0.18;
     this.mesh.rotation.x += (this.trackPitch * 0.48 - this.mesh.rotation.x) * 0.16;
 
-    if (Math.abs(this.position.x - targetX) < 0.001) {
-      this.position.x = targetX;
+    if (Math.abs(this.logicalLaneX - targetX) < 0.001) {
+      this.logicalLaneX = targetX;
       this.currentLane = this.targetLane;
     }
+  }
+
+  public setRideTarget(x: number, y: number, z: number): void {
+    this.rideTarget.set(x, y, z);
   }
 
   public setTrackPose(height: number, bank: number, pitch: number): void {
@@ -43,7 +51,11 @@ export class Player extends Entity {
     this.trackPitch = pitch;
   }
 
+  public getLaneOffsetX(): number {
+    return this.logicalLaneX;
+  }
+
   public getZ(): number {
-    return this.position.z;
+    return this.logicalTrackZ;
   }
 }

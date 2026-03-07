@@ -50,7 +50,7 @@ export class CollisionSystem {
 
   public update(deltaTime: number): void {
     const playerHitZ = this.player.getZ() + HIT_LINE_Z_OFFSET;
-    const playerX = this.player.position.x;
+    const playerX = this.player.getLaneOffsetX();
     const playerLateralSpeed = (playerX - this.previousPlayerX) / Math.max(1e-4, deltaTime);
     this.previousPlayerX = playerX;
 
