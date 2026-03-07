@@ -38,13 +38,17 @@ export class NoteSpawner {
   private effectIntensity = 1;
 
   public constructor(scene: THREE.Scene) {
-    const geometry = new THREE.CylinderGeometry(0.45, 0.45, 0.24, 16);
-    this.material = new THREE.MeshStandardMaterial({
+    const geometry = new THREE.IcosahedronGeometry(0.42, 1);
+    this.material = new THREE.MeshPhysicalMaterial({
       color: 0x22d3ee,
       emissive: 0x22d3ee,
-      emissiveIntensity: 0.7,
-      metalness: 0.25,
-      roughness: 0.35,
+      emissiveIntensity: 0.95,
+      metalness: 0.35,
+      roughness: 0.2,
+      clearcoat: 0.72,
+      clearcoatRoughness: 0.08,
+      transmission: 0.08,
+      thickness: 0.7,
       vertexColors: true
     });
 
@@ -62,12 +66,14 @@ export class NoteSpawner {
     }
 
     const markerGeometry = new THREE.BoxGeometry(LANE_WIDTH * (LANES + 1), 0.12, 0.5);
-    const markerMaterial = new THREE.MeshStandardMaterial({
+    const markerMaterial = new THREE.MeshPhysicalMaterial({
       color: 0xe0f2fe,
       emissive: 0x38bdf8,
-      emissiveIntensity: 1.5,
-      metalness: 0.15,
-      roughness: 0.45,
+      emissiveIntensity: 1.8,
+      metalness: 0.35,
+      roughness: 0.22,
+      clearcoat: 0.45,
+      clearcoatRoughness: 0.16,
       vertexColors: true
     });
     this.markerMesh = new THREE.InstancedMesh(markerGeometry, markerMaterial, MARKER_POOL_SIZE);

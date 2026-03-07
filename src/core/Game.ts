@@ -97,11 +97,8 @@ export class Game {
     this.track = new Track();
     this.sceneManager.add(this.track.group);
 
-    const playerGeometry = new THREE.BoxGeometry(1.2, 0.8, 1.4);
-    const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x22c55e, metalness: 0.1, roughness: 0.65 });
-    const playerMesh = new THREE.Mesh(playerGeometry, playerMaterial);
-    playerMesh.castShadow = true;
-    this.player = new Player(playerMesh);
+    const playerRig = this.createPlayerRig();
+    this.player = new Player(playerRig);
     this.sceneManager.add(this.player.mesh);
 
     this.audioManager = new AudioManager();
@@ -665,5 +662,61 @@ export class Game {
       return 0.64;
     }
     return 1;
+  }
+
+  private createPlayerRig(): THREE.Object3D {
+    const root = new THREE.Group();
+
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.45, 1.05, 6, 14),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x22c55e,
+        roughness: 0.3,
+        metalness: 0.45,
+        clearcoat: 0.62,
+        clearcoatRoughness: 0.08,
+        emissive: 0x064e3b,
+        emissiveIntensity: 0.5
+      })
+    );
+    body.position.y = 0.25;
+    body.castShadow = true;
+    root.add(body);
+
+    const canopy = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 20, 16),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x67e8f9,
+        emissive: 0x22d3ee,
+        emissiveIntensity: 0.9,
+        roughness: 0.08,
+        metalness: 0.2,
+        transmission: 0.82,
+        thickness: 0.8,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.04,
+        transparent: true,
+        opacity: 0.92
+      })
+    );
+    canopy.position.set(0, 0.72, 0.08);
+    root.add(canopy);
+
+    const trim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.05, 12, 44),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x22d3ee,
+        emissive: 0x38bdf8,
+        emissiveIntensity: 1.3,
+        roughness: 0.2,
+        metalness: 0.62
+      })
+    );
+    trim.rotation.x = Math.PI * 0.5;
+    trim.position.y = 0.12;
+    trim.castShadow = true;
+    root.add(trim);
+
+    return root;
   }
 }

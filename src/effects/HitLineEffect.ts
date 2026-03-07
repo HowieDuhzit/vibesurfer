@@ -11,12 +11,14 @@ export class HitLineEffect {
 
   public constructor(scene: THREE.Scene) {
     const geometry = new THREE.BoxGeometry(LANE_WIDTH * (LANES + 1), 0.03, 0.36);
-    this.material = new THREE.MeshStandardMaterial({
+    this.material = new THREE.MeshPhysicalMaterial({
       color: 0xbfdbfe,
       emissive: 0x38bdf8,
       emissiveIntensity: 1.2,
-      metalness: 0.12,
-      roughness: 0.45
+      metalness: 0.32,
+      roughness: 0.18,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.1
     });
 
     this.mesh = new THREE.Mesh(geometry, this.material);

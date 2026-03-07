@@ -9,7 +9,7 @@ export class Player extends Entity {
   public targetLane = 1;
   public readonly position: THREE.Vector3;
 
-  public constructor(mesh: THREE.Mesh) {
+  public constructor(mesh: THREE.Object3D) {
     super(mesh);
     this.position = mesh.position;
     this.position.set(0, 0.5, 0);

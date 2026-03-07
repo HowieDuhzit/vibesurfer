@@ -10,10 +10,14 @@ export class Renderer {
     this.webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.webglRenderer.setSize(this.mount.clientWidth, this.mount.clientHeight);
     this.webglRenderer.shadowMap.enabled = true;
+    this.webglRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.webglRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.webglRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.webglRenderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x020617);
+    this.scene.fog = new THREE.FogExp2(0x020617, 0.015);
 
     this.camera = new THREE.PerspectiveCamera(70, this.aspect, 0.1, 1000);
     this.camera.position.set(0, 4, 6);
