@@ -189,8 +189,9 @@ export class Track {
     const u = this.trackZToU(trackZ);
     this.centerlineCurve.getPointAt(u, this.tempCenter);
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
+    const worldLaneOffset = -laneOffset;
     out.copy(this.tempCenter)
-      .addScaledVector(this.tempRight, laneOffset)
+      .addScaledVector(this.tempRight, worldLaneOffset)
       .addScaledVector(this.tempUp, heightOffset);
     return out;
   }
