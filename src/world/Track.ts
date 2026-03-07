@@ -17,6 +17,8 @@ export class Track {
   public readonly segments: TrackSegment[] = [];
 
   private readonly trackLength = 240;
+  private readonly rearLength = 36;
+  private readonly totalCurveLength = this.trackLength + this.rearLength;
   private readonly frontPadding = 8;
   private readonly lengthSegments = 160;
   private readonly trackWidth = LANE_WIDTH * (LANES + 1);
@@ -70,7 +72,7 @@ export class Track {
     this.centerlinePoints = new Array(22);
     for (let i = 0; i < this.centerlinePoints.length; i += 1) {
       const u = i / (this.centerlinePoints.length - 1);
-      this.centerlinePoints[i] = new THREE.Vector3(0, 0, -u * this.trackLength);
+      this.centerlinePoints[i] = new THREE.Vector3(0, 0, this.rearLength - u * this.totalCurveLength);
     }
     this.centerlineCurve = new THREE.CatmullRomCurve3(this.centerlinePoints, false, "centripetal", 0.5);
     for (let i = 0; i <= this.lengthSegments; i += 1) {
@@ -184,7 +186,7 @@ export class Track {
   }
 
   public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
-    const u = Math.max(0, Math.min(1, (this.frontPadding - trackZ) / this.trackLength));
+    const u = Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
     this.centerlineCurve.getPointAt(u, this.tempCenter);
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.copy(this.tempCenter)
@@ -194,7 +196,7 @@ export class Track {
   }
 
   public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
-    const u = Math.max(0, Math.min(1, (this.frontPadding - trackZ) / this.trackLength));
+    const u = Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
     this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
@@ -266,10 +268,10 @@ export class Track {
       const hillA = Math.sin(phase2) * this.lift * 0.38 * damp;
       const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.22 * damp;
       const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.13 * damp;
-      const slope = this.forwardLean * u * this.trackLength * 0.1;
+      const slope = this.forwardLean * u * this.totalCurveLength * 0.1;
       const y = baseLift + hillA + hillB + drop + slope;
 
-      this.centerlinePoints[i].set(lateral, y, this.frontPadding - u * this.trackLength);
+      this.centerlinePoints[i].set(lateral, y, this.rearLength + this.frontPadding - u * this.totalCurveLength);
     }
   }
 
