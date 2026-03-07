@@ -63,6 +63,8 @@ const breakdownLabel = byId<HTMLSpanElement>("breakdown");
 const chartSummaryLabel = byId<HTMLSpanElement>("chart-summary");
 const profileSummaryLabel = byId<HTMLSpanElement>("profile-summary");
 const missionSummaryLabel = byId<HTMLSpanElement>("mission-summary");
+const sessionSummaryLabel = byId<HTMLSpanElement>("session-summary");
+const goalSummaryLabel = byId<HTMLSpanElement>("goal-summary");
 const debugLabel = byId<HTMLDivElement>("debug");
 const judgmentLabel = byId<HTMLDivElement>("judgment");
 
@@ -129,6 +131,11 @@ const loadProfile = (): Profile => {
 };
 
 const profile = loadProfile();
+const session = {
+  plays: 0,
+  clears: 0,
+  bestCombo: 0
+};
 
 const saveProfile = (): void => {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
@@ -173,6 +180,7 @@ game.setStrictMode(savedStrict);
 const updateProfileUi = (): void => {
   profileSummaryLabel.textContent = `Profile Plays:${profile.totalPlays} Clears:${profile.clears} BestAcc:${(profile.bestAccuracy * 100).toFixed(1)}% BestCombo:${profile.bestCombo}`;
   missionSummaryLabel.textContent = `Missions 50:${profile.missions.combo50 ? "Y" : "N"} 100:${profile.missions.combo100 ? "Y" : "N"} Acc90:${profile.missions.accuracy90 ? "Y" : "N"}`;
+  sessionSummaryLabel.textContent = `Session Plays:${session.plays} Clears:${session.clears} BestCombo:${session.bestCombo}`;
 };
 
 updateProfileUi();
@@ -229,7 +237,8 @@ const updateHud = (): void => {
   chartSummaryLabel.textContent = `Chart N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}`;
 
   const debug = game.getDebugState();
-  debugLabel.textContent = `Playing:${debug.playing} Pending:${debug.pendingSpawns} Active:${debug.activeNotes} Progress:${(debug.progress * 100).toFixed(1)}% Q:${qualityModeSelect.value}`;
+  const perf = game.getPerformanceState();
+  debugLabel.textContent = `Playing:${debug.playing} Pending:${debug.pendingSpawns} Active:${debug.activeNotes} Progress:${(debug.progress * 100).toFixed(1)}% Q:${qualityModeSelect.value}/${perf.qualityScale.toFixed(2)} FPS:${perf.fps.toFixed(1)}`;
 
   const result = game.getResultState();
   resultPanel.classList.toggle("show", result.complete);
@@ -250,6 +259,8 @@ const updateHud = (): void => {
   resultTech.textContent = `Hold C/B:${result.holdCompleted}/${result.holdBroken} Slide C/B:${result.slideCompleted}/${result.slideBroken}`;
 
   if (result.complete && !previousResultComplete) {
+    session.clears += 1;
+    session.bestCombo = Math.max(session.bestCombo, result.maxCombo);
     profile.clears += 1;
     profile.totalScore += result.score;
     profile.bestAccuracy = Math.max(profile.bestAccuracy, result.accuracy);
@@ -261,6 +272,9 @@ const updateHud = (): void => {
     updateProfileUi();
   }
   previousResultComplete = result.complete;
+  const nextComboGoal = profile.missions.combo100 ? "All Major Combo Goals Complete" : profile.missions.combo50 ? "Next: 100 Combo" : "Next: 50 Combo";
+  const nextAccGoal = profile.missions.accuracy90 ? "Accuracy Goal Complete" : "Next: 90% Accuracy";
+  goalSummaryLabel.textContent = `Goals ${nextComboGoal} | ${nextAccGoal}`;
 
   hudRaf = requestAnimationFrame(updateHud);
 };
@@ -279,6 +293,7 @@ fileInput.addEventListener("change", async () => {
 });
 
 playButton.addEventListener("click", async () => {
+  session.plays += 1;
   profile.totalPlays += 1;
   saveProfile();
   updateProfileUi();

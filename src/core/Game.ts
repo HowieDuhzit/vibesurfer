@@ -465,6 +465,13 @@ export class Game {
     };
   }
 
+  public getPerformanceState(): Readonly<{ fps: number; qualityScale: number }> {
+    return {
+      fps: this.frameCostAvg > 0 ? 1 / this.frameCostAvg : 0,
+      qualityScale: this.qualityScale
+    };
+  }
+
   public setEffectIntensity(scale: number): void {
     this.effectIntensity = Math.max(0.3, Math.min(2, scale));
     this.particleSystem.setIntensity(this.effectIntensity);
@@ -505,7 +512,6 @@ export class Game {
     }
     if (this.strictMode) {
       window *= 0.83;
-      this.setLaneTolerance(0.45);
     }
     this.collisionSystem.setHitWindow(window);
   }
