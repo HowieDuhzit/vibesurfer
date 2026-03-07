@@ -40,6 +40,9 @@ export class Track {
   private readonly tempBinormal = new THREE.Vector3();
   private readonly tempQuat = new THREE.Quaternion();
   private readonly tempRollQuat = new THREE.Quaternion();
+  private readonly tempAxis = new THREE.Vector3();
+  private readonly tempPrevTangent = new THREE.Vector3();
+  private readonly tempRotateQuat = new THREE.Quaternion();
   private readonly frameTangents: THREE.Vector3[] = [];
   private readonly frameNormals: THREE.Vector3[] = [];
   private readonly frameBinormals: THREE.Vector3[] = [];
@@ -336,24 +339,53 @@ export class Track {
   }
 
   private refreshFrenetFrames(): void {
-    const frames = this.centerlineCurve.computeFrenetFrames(this.lengthSegments, false);
-    for (let i = 0; i <= this.lengthSegments; i += 1) {
-      this.frameTangents[i].copy(frames.tangents[i]);
-      this.frameNormals[i].copy(frames.normals[i]);
-      this.frameBinormals[i].copy(frames.binormals[i]);
-    }
+    // Rotation-minimizing frames (parallel transport) are more stable than raw
+    // Frenet frames for dynamic curves and prevent random 180-degree flips.
+    this.centerlineCurve.getTangentAt(0, this.frameTangents[0]).normalize();
 
-    // Enforce consistent frame orientation between adjacent samples to avoid
-    // sign flips that can turn the ribbon sideways for a frame.
+    this.frameBinormals[0]
+      .copy(this.worldUp)
+      .addScaledVector(this.frameTangents[0], -this.worldUp.dot(this.frameTangents[0]));
+    if (this.frameBinormals[0].lengthSq() < 1e-8) {
+      this.frameBinormals[0].set(0, 0, 1).addScaledVector(
+        this.frameTangents[0],
+        -this.frameTangents[0].z
+      );
+    }
+    this.frameBinormals[0].normalize();
+    this.frameNormals[0].crossVectors(this.frameBinormals[0], this.frameTangents[0]).normalize();
+
     for (let i = 1; i <= this.lengthSegments; i += 1) {
-      if (this.frameNormals[i].dot(this.frameNormals[i - 1]) < 0) {
-        this.frameNormals[i].multiplyScalar(-1);
-        this.frameBinormals[i].multiplyScalar(-1);
+      const u = i / this.lengthSegments;
+      this.centerlineCurve.getTangentAt(Math.min(0.9999, u), this.frameTangents[i]).normalize();
+
+      this.tempPrevTangent.copy(this.frameTangents[i - 1]);
+      this.tempAxis.crossVectors(this.tempPrevTangent, this.frameTangents[i]);
+      const axisLen = this.tempAxis.length();
+
+      if (axisLen > 1e-8) {
+        this.tempAxis.multiplyScalar(1 / axisLen);
+        const dot = THREE.MathUtils.clamp(this.tempPrevTangent.dot(this.frameTangents[i]), -1, 1);
+        const angle = Math.acos(dot);
+        this.tempRotateQuat.setFromAxisAngle(this.tempAxis, angle);
+        this.frameNormals[i].copy(this.frameNormals[i - 1]).applyQuaternion(this.tempRotateQuat).normalize();
+        this.frameBinormals[i].copy(this.frameBinormals[i - 1]).applyQuaternion(this.tempRotateQuat).normalize();
+      } else {
+        this.frameNormals[i].copy(this.frameNormals[i - 1]);
+        this.frameBinormals[i].copy(this.frameBinormals[i - 1]);
       }
-      if (this.frameBinormals[i].dot(this.frameBinormals[i - 1]) < 0) {
-        this.frameNormals[i].multiplyScalar(-1);
+
+      // Keep the frame upright and right-handed.
+      if (this.frameBinormals[i].dot(this.worldUp) < 0) {
         this.frameBinormals[i].multiplyScalar(-1);
+        this.frameNormals[i].multiplyScalar(-1);
       }
+      this.frameNormals[i]
+        .crossVectors(this.frameBinormals[i], this.frameTangents[i])
+        .normalize();
+      this.frameBinormals[i]
+        .crossVectors(this.frameTangents[i], this.frameNormals[i])
+        .normalize();
     }
   }
 
