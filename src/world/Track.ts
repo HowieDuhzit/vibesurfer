@@ -204,11 +204,11 @@ export class Track {
     const p = Math.max(0, Math.min(1, pace));
     const f = Math.max(0, Math.min(1, feature));
 
-    this.targetLift = e * 0.6 + f * 0.22;
-    this.targetBank = c * (0.04 + p * 0.08);
-    this.targetCurve = c * (0.24 + p * 0.35 + f * 0.15);
+    this.targetLift = e * 3.2 + f * 1.2;
+    this.targetBank = c * (0.12 + p * 0.18 + f * 0.08);
+    this.targetCurve = c * (2.4 + p * 2.6 + f * 1.4);
     this.targetPace = p;
-    this.targetForwardLean = -0.008 - p * 0.02;
+    this.targetForwardLean = -0.02 - p * 0.05;
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
@@ -283,12 +283,20 @@ export class Track {
     const points = this.centerlinePoints;
     for (let i = 0; i < points.length; i += 1) {
       const u = i / (points.length - 1);
-      const damp = this.smoothstep(0.1, 1, u);
+      const damp = this.smoothstep(0.03, 1, u);
+      const laneSafeDamp = this.smoothstep(0.18, 1, u);
       const phase = (u * (1.25 + this.pace * 1.4) + this.waveTime * (0.12 + this.pace * 0.11)) * Math.PI * 2;
       const phase2 = phase * 0.72 + 0.8;
 
-      const lateral = Math.sin(phase) * this.curve * (0.08 + damp * 1.35);
-      const lift = this.lift * (0.05 + damp * 0.95) + Math.sin(phase2) * this.lift * 0.16 * damp;
+      const lateralPrimary = Math.sin(phase) * this.curve * (0.08 + laneSafeDamp * 0.9);
+      const lateralSecondary = Math.sin(phase * 0.47 + 1.3) * this.curve * 0.35 * laneSafeDamp;
+      const lateral = lateralPrimary + lateralSecondary;
+
+      const baseLift = this.lift * (0.06 + laneSafeDamp * 0.94);
+      const rollerA = Math.sin(phase2) * this.lift * 0.55 * damp;
+      const rollerB = Math.sin(phase * 0.21 + 2.1) * this.lift * 0.35 * laneSafeDamp;
+      const drop = -Math.max(0, Math.sin(phase * 0.31 - 0.7)) * this.lift * 0.18 * laneSafeDamp;
+      const lift = baseLift + rollerA + rollerB + drop;
       const z = -u * this.totalLength;
       points[i].set(lateral, lift, z);
     }
