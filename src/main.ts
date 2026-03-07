@@ -464,7 +464,7 @@ function drawAnalysisDebug(): void {
   ctx.fillRect(0, 0, w, h);
 
   const debug = game.getGeneratorDebugData();
-  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Notes:${debug.diagnostics.notes} NPS:${debug.diagnostics.nps.toFixed(2)} Lanes:${debug.diagnostics.lane0}/${debug.diagnostics.lane1}/${debug.diagnostics.lane2} Sections:${debug.sections.length}`;
+  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Notes:${debug.diagnostics.notes} NPS:${debug.diagnostics.nps.toFixed(2)} Lanes:${debug.diagnostics.lane0}/${debug.diagnostics.lane1}/${debug.diagnostics.lane2} Sections:${debug.sections.length} Beats:${debug.beats.length} Onsets:${debug.onsets.length}`;
 
   const drawCurve = (values: readonly number[], color: string, yScale = 1): void => {
     if (values.length < 2) {
@@ -492,7 +492,27 @@ function drawAnalysisDebug(): void {
   drawCurve(debug.plan.feature, "rgba(34,197,94,0.85)");
   drawCurve(debug.plan.novelty, "rgba(244,63,94,0.8)");
 
-  const totalDuration = Math.max(1, debug.anchors.length > 0 ? debug.anchors[debug.anchors.length - 1] + 1 : 1);
+  const totalDuration = Math.max(1, debug.duration || (debug.anchors.length > 0 ? debug.anchors[debug.anchors.length - 1] + 1 : 1));
+  ctx.strokeStyle = "rgba(244,63,94,0.2)";
+  for (let i = 0; i < debug.onsets.length; i += 1) {
+    const t = debug.onsets[i];
+    const x = (t / totalDuration) * w;
+    ctx.beginPath();
+    ctx.moveTo(x, h * 0.72);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(34,211,238,0.28)";
+  for (let i = 0; i < debug.beats.length; i += 1) {
+    const t = debug.beats[i];
+    const x = (t / totalDuration) * w;
+    ctx.beginPath();
+    ctx.moveTo(x, h * 0.46);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+
   ctx.strokeStyle = "rgba(125, 211, 252, 0.35)";
   ctx.lineWidth = 1;
   for (let i = 0; i < debug.anchors.length; i += 1) {
@@ -502,5 +522,25 @@ function drawAnalysisDebug(): void {
     ctx.moveTo(x, 0);
     ctx.lineTo(x, h);
     ctx.stroke();
+  }
+
+  if (debug.sections.length > 0) {
+    const laneHeight = 6;
+    const totalFrames = Math.max(1, debug.sections[debug.sections.length - 1].endFrame + 1);
+    for (let i = 0; i < debug.sections.length; i += 1) {
+      const s = debug.sections[i];
+      const startT = (s.startFrame / totalFrames) * totalDuration;
+      const endT = (s.endFrame / totalFrames) * totalDuration;
+      const x0 = (startT / totalDuration) * w;
+      const x1 = (endT / totalDuration) * w;
+      ctx.fillStyle = s.label === "chorus"
+        ? "rgba(34,197,94,0.45)"
+        : s.label === "breakdown"
+          ? "rgba(234,179,8,0.45)"
+          : s.label === "intro" || s.label === "outro"
+            ? "rgba(148,163,184,0.35)"
+            : "rgba(59,130,246,0.35)";
+      ctx.fillRect(x0, 0, Math.max(1, x1 - x0), laneHeight);
+    }
   }
 }

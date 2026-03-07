@@ -27,8 +27,11 @@ export interface BeatMarkerEvent {
 export interface GeneratorDebugData {
   bpm: number;
   beatConfidence: number;
+  duration: number;
   sections: SongSection[];
   anchors: number[];
+  beats: number[];
+  onsets: number[];
   diagnostics: {
     notes: number;
     nps: number;
@@ -92,8 +95,11 @@ export class BeatMapGenerator {
   private debugData: GeneratorDebugData = {
     bpm: 120,
     beatConfidence: 0,
+    duration: 1,
     sections: [],
     anchors: [],
+    beats: [],
+    onsets: [],
     diagnostics: {
       notes: 0,
       nps: 0,
@@ -132,8 +138,11 @@ export class BeatMapGenerator {
     this.debugData = {
       bpm: rhythm.bpm,
       beatConfidence: rhythm.confidence,
+      duration: song.duration,
       sections: structure.sections,
       anchors: structure.bigMomentFrames.map((f) => song.frames[Math.max(0, Math.min(song.frames.length - 1, f))]?.time ?? 0),
+      beats: this.compactFrameTimes(song, rhythm.beatFrames),
+      onsets: this.compactFrameTimes(song, rhythm.onsetFrames),
       diagnostics: {
         notes: 0,
         nps: 0,
@@ -298,6 +307,19 @@ export class BeatMapGenerator {
       feature: downsample(track.featureEligibility),
       novelty: downsample(novelty)
     };
+  }
+
+  private compactFrameTimes(song: SongAnalysis, frames: readonly number[]): number[] {
+    if (frames.length === 0) {
+      return [];
+    }
+    const step = Math.max(1, Math.floor(frames.length / 300));
+    const out: number[] = [];
+    for (let i = 0; i < frames.length; i += step) {
+      const f = Math.max(0, Math.min(song.frames.length - 1, frames[i]));
+      out.push(song.frames[f]?.time ?? 0);
+    }
+    return out;
   }
 
   private getOrAnalyze(buffer: AudioBuffer): {
