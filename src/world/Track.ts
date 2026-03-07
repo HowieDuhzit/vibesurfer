@@ -15,9 +15,12 @@ export class Track {
   private readonly tempColor = new THREE.Color();
   private readonly centerlineCurve: THREE.CatmullRomCurve3;
   private readonly centerlinePoints: THREE.Vector3[];
+  private readonly worldUp = new THREE.Vector3(0, 1, 0);
   private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
   private readonly tempPoint = new THREE.Vector3();
   private readonly tempTangent = new THREE.Vector3();
+  private readonly tempRight = new THREE.Vector3();
+  private readonly tempUp = new THREE.Vector3();
   private readonly tempQuat = new THREE.Quaternion();
   private readonly tempRollQuat = new THREE.Quaternion();
   private riderHeight = 0;
@@ -103,13 +106,13 @@ export class Track {
     }
     this.centerlineCurve = new THREE.CatmullRomCurve3(this.centerlinePoints, false, "centripetal", 0.5);
 
-    const segmentRoadGeometry = new THREE.PlaneGeometry(width, SEGMENT_LENGTH * 1.06);
-    const lineGeometry = new THREE.BoxGeometry(0.08, 0.05, SEGMENT_LENGTH * 0.96);
+    const segmentRoadGeometry = new THREE.PlaneGeometry(width, SEGMENT_LENGTH * 1.22);
+    const lineGeometry = new THREE.BoxGeometry(0.08, 0.05, SEGMENT_LENGTH * 1.18);
     const shoulderWidth = 1.68;
     const shoulderHeight = 0.22;
-    const sideGeometry = new THREE.BoxGeometry(shoulderWidth, shoulderHeight, SEGMENT_LENGTH * 1.03);
-    const railGeometry = new THREE.CylinderGeometry(0.06, 0.06, SEGMENT_LENGTH * 1.02, 10);
-    const glowGeometry = new THREE.BoxGeometry(0.03, 0.13, SEGMENT_LENGTH * 0.98);
+    const sideGeometry = new THREE.BoxGeometry(shoulderWidth, shoulderHeight, SEGMENT_LENGTH * 1.2);
+    const railGeometry = new THREE.CylinderGeometry(0.06, 0.06, SEGMENT_LENGTH * 1.2, 10);
+    const glowGeometry = new THREE.BoxGeometry(0.03, 0.13, SEGMENT_LENGTH * 1.16);
     const halfTrack = width * 0.5;
 
     for (let i = 0; i < SEGMENT_COUNT; i += 1) {
@@ -252,6 +255,46 @@ export class Track {
       bank: this.riderBank,
       pitch: this.riderPitch
     };
+  }
+
+  public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
+    const distanceAhead = Math.max(0, Math.min(this.totalLength, -trackZ));
+    const u = distanceAhead / this.totalLength;
+    this.centerlineCurve.getPointAt(u, this.tempPoint);
+    this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent);
+    if (this.tempTangent.lengthSq() < 1e-8) {
+      this.tempTangent.set(0, 0, -1);
+    } else {
+      this.tempTangent.normalize();
+    }
+
+    this.tempRight.crossVectors(this.tempTangent, this.worldUp);
+    if (this.tempRight.lengthSq() < 1e-8) {
+      this.tempRight.set(1, 0, 0);
+    } else {
+      this.tempRight.normalize();
+    }
+    this.tempUp.crossVectors(this.tempRight, this.tempTangent).normalize();
+
+    out.copy(this.tempPoint)
+      .addScaledVector(this.tempRight, laneOffset)
+      .addScaledVector(this.tempUp, heightOffset);
+    return out;
+  }
+
+  public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
+    const distanceAhead = Math.max(0, Math.min(this.totalLength, -trackZ));
+    const u = distanceAhead / this.totalLength;
+    this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent);
+    if (this.tempTangent.lengthSq() < 1e-8) {
+      this.tempTangent.set(0, 0, -1);
+    } else {
+      this.tempTangent.normalize();
+    }
+    out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
+    this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
+    out.multiply(this.tempRollQuat);
+    return out;
   }
 
   private makeRoadTexture(): THREE.CanvasTexture {

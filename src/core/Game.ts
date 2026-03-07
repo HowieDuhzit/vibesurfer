@@ -106,7 +106,7 @@ export class Game {
     this.beatDetector = new BeatDetector(this.audioAnalyzer);
     this.beatMapGenerator = new BeatMapGenerator();
 
-    this.spawner = new NoteSpawner(this.sceneManager.scene);
+    this.spawner = new NoteSpawner(this.sceneManager.scene, this.track);
 
     this.input = new InputManager(this.mount);
     this.scoreSystem = new ScoreSystem();

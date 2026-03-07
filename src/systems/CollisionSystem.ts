@@ -62,7 +62,8 @@ export class CollisionSystem {
     for (let i = activeIds.length - 1; i >= 0; i -= 1) {
       const note = this.noteSpawner.getNoteByInstanceId(activeIds[i]);
       const distance = Math.abs(playerHitZ - note.zPosition);
-      const laneAligned = Math.abs(note.mesh.position.x - playerX) <= this.laneTolerance;
+      const noteLaneX = this.laneToX(note.lane);
+      const laneAligned = Math.abs(noteLaneX - playerX) <= this.laneTolerance;
 
       if (laneAligned && note.type === "mine" && distance <= this.goodDistance) {
         this.scoreSystem.onMineHit();

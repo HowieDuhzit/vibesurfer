@@ -3,6 +3,7 @@ import { LANE_WIDTH, LANES, NOTE_POOL_SIZE, SPAWN_DISTANCE } from "../core/Confi
 import { BeatMarkerEvent, SpawnEvent } from "../audio/BeatMapGenerator";
 import { NoteType } from "../entities/Note";
 import { Note } from "../entities/Note";
+import { Track } from "./Track";
 
 const MARKER_POOL_SIZE = NOTE_POOL_SIZE * 3;
 
@@ -21,6 +22,8 @@ export class NoteSpawner {
 
   private readonly matrixDummy = new THREE.Object3D();
   private readonly emptyMatrix = new THREE.Matrix4().makeTranslation(0, -1000, 0);
+  private readonly worldPos = new THREE.Vector3();
+  private readonly worldQuat = new THREE.Quaternion();
 
   private readonly material: THREE.MeshStandardMaterial;
   private readonly laneColors = [new THREE.Color(0xf97316), new THREE.Color(0x22d3ee), new THREE.Color(0xfacc15)];
@@ -37,7 +40,7 @@ export class NoteSpawner {
   private readonly markerBarColor = new THREE.Color(0xfef9c3);
   private effectIntensity = 1;
 
-  public constructor(scene: THREE.Scene) {
+  public constructor(scene: THREE.Scene, private readonly track: Track) {
     const geometry = new THREE.IcosahedronGeometry(0.42, 1);
     this.material = new THREE.MeshPhysicalMaterial({
       color: 0x22d3ee,
@@ -249,22 +252,27 @@ export class NoteSpawner {
   }
 
   private writeMatrix(note: Note): void {
-    this.matrixDummy.position.copy(note.mesh.position);
+    const laneOffset = (note.lane - 1) * LANE_WIDTH;
+    this.track.sampleLanePoint(note.zPosition, laneOffset, 0.36, this.worldPos);
+    this.track.sampleLaneQuaternion(note.zPosition, 0, this.worldQuat);
+    note.mesh.position.copy(this.worldPos);
+
+    this.matrixDummy.position.copy(this.worldPos);
+    this.matrixDummy.quaternion.copy(this.worldQuat);
     if (note.type === "slide") {
       const direction = Math.sign(note.slideToLane - note.lane);
-      this.matrixDummy.rotation.set(0, 0, direction * 0.42);
+      this.matrixDummy.rotateZ(direction * 0.42);
       this.matrixDummy.scale.set(1.28, 1, 0.86);
     } else if (note.type === "hold") {
-      this.matrixDummy.rotation.set(0, 0, 0);
       this.matrixDummy.scale.set(0.95, 1.05, 1.2 + note.duration * 1.6);
     } else if (note.type === "double") {
-      this.matrixDummy.rotation.set(0, 0, 0);
       this.matrixDummy.scale.set(1.35, 1.05, 1.35);
     } else if (note.type === "mine") {
-      this.matrixDummy.rotation.set(0.8, note.zPosition * 0.08, 0.8);
+      this.matrixDummy.rotateX(0.8);
+      this.matrixDummy.rotateY(note.zPosition * 0.08);
+      this.matrixDummy.rotateZ(0.8);
       this.matrixDummy.scale.set(0.78, 0.78, 0.78);
     } else {
-      this.matrixDummy.rotation.set(0, 0, 0);
       this.matrixDummy.scale.set(1, 1, 1);
     }
     this.matrixDummy.updateMatrix();
@@ -272,8 +280,10 @@ export class NoteSpawner {
   }
 
   private writeMarkerMatrix(instanceId: number): void {
-    this.matrixDummy.position.set(0, 0.12, this.markerZ[instanceId]);
-    this.matrixDummy.rotation.set(0, 0, 0);
+    this.track.sampleLanePoint(this.markerZ[instanceId], 0, 0.12, this.worldPos);
+    this.track.sampleLaneQuaternion(this.markerZ[instanceId], 0, this.worldQuat);
+    this.matrixDummy.position.copy(this.worldPos);
+    this.matrixDummy.quaternion.copy(this.worldQuat);
     const isBar = this.markerIsBar[instanceId] === 1;
     this.matrixDummy.scale.set(1, isBar ? 1.8 : 1, 1);
     this.matrixDummy.updateMatrix();
