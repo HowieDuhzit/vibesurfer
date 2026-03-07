@@ -30,14 +30,18 @@ export class Track {
 
   private readonly surfaces: RibbonSurface[] = [];
 
-  private readonly worldUp = new THREE.Vector3(0, 1, 0);
   private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
   private readonly tempCenter = new THREE.Vector3();
   private readonly tempTangent = new THREE.Vector3();
   private readonly tempRight = new THREE.Vector3();
   private readonly tempUp = new THREE.Vector3();
+  private readonly tempNormal = new THREE.Vector3();
+  private readonly tempBinormal = new THREE.Vector3();
   private readonly tempQuat = new THREE.Quaternion();
   private readonly tempRollQuat = new THREE.Quaternion();
+  private readonly frameTangents: THREE.Vector3[] = [];
+  private readonly frameNormals: THREE.Vector3[] = [];
+  private readonly frameBinormals: THREE.Vector3[] = [];
 
   private targetLift = 0;
   private targetBank = 0;
@@ -63,6 +67,11 @@ export class Track {
       this.centerlinePoints[i] = new THREE.Vector3(0, 0, -u * this.trackLength);
     }
     this.centerlineCurve = new THREE.CatmullRomCurve3(this.centerlinePoints, false, "centripetal", 0.5);
+    for (let i = 0; i <= this.lengthSegments; i += 1) {
+      this.frameTangents.push(new THREE.Vector3(0, 0, -1));
+      this.frameNormals.push(new THREE.Vector3(1, 0, 0));
+      this.frameBinormals.push(new THREE.Vector3(0, 1, 0));
+    }
 
     this.roadMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x0b1228,
@@ -112,6 +121,7 @@ export class Track {
     this.surfaces.push(this.createRibbonSurface(0.05, glowOffset, 0.11, 1, this.glowMaterial));
     this.surfaces.push(this.createRibbonSurface(0.05, -glowOffset, 0.11, 1, this.glowMaterial));
 
+    this.refreshFrenetFrames();
     this.updateWarpedGeometry();
   }
 
@@ -126,6 +136,7 @@ export class Track {
     this.forwardLean += (this.targetForwardLean - this.forwardLean) * smooth;
 
     this.refreshCenterlineSpline();
+    this.refreshFrenetFrames();
     this.updateWarpedGeometry();
     this.updateRiderPose();
   }
@@ -169,8 +180,7 @@ export class Track {
   public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
     const u = Math.max(0, Math.min(1, (-trackZ) / this.trackLength));
     this.centerlineCurve.getPointAt(u, this.tempCenter);
-    this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent).normalize();
-    this.computeFrame(this.tempTangent);
+    this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.copy(this.tempCenter)
       .addScaledVector(this.tempRight, laneOffset)
       .addScaledVector(this.tempUp, heightOffset);
@@ -179,7 +189,7 @@ export class Track {
 
   public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
     const u = Math.max(0, Math.min(1, (-trackZ) / this.trackLength));
-    this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent).normalize();
+    this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
     this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
     out.multiply(this.tempRollQuat);
@@ -266,8 +276,7 @@ export class Track {
       for (let zi = 0; zi <= this.lengthSegments; zi += 1) {
         const u = zi / this.lengthSegments;
         this.centerlineCurve.getPointAt(u, this.tempCenter);
-        this.centerlineCurve.getTangentAt(Math.min(0.9999, u + 1e-4), this.tempTangent).normalize();
-        this.computeFrame(this.tempTangent);
+        this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
 
         const phase = (u * (1.1 + this.pace * 0.95) + this.waveTime * (0.09 + this.pace * 0.1)) * Math.PI * 2;
         const damp = 0.52 + 0.48 * this.smoothstep(0.08, 1, u);
@@ -293,21 +302,39 @@ export class Track {
 
   private updateRiderPose(): void {
     this.centerlineCurve.getPointAt(0, this.tempCenter);
-    this.centerlineCurve.getTangentAt(0.001, this.tempTangent).normalize();
+    this.sampleFrameAt(0, this.tempTangent, this.tempRight, this.tempUp);
     const forwardLen = Math.max(1e-6, Math.hypot(this.tempTangent.x, this.tempTangent.z));
     this.riderPitch = Math.atan2(this.tempTangent.y, forwardLen);
     this.riderBank = this.bank * 0.9 + Math.sin(this.waveTime * 1.8) * this.curve * 0.02;
     this.riderHeight = this.tempCenter.y;
   }
 
-  private computeFrame(tangent: THREE.Vector3): void {
-    this.tempRight.crossVectors(tangent, this.worldUp);
-    if (this.tempRight.lengthSq() < 1e-8) {
-      this.tempRight.set(1, 0, 0);
-    } else {
-      this.tempRight.normalize();
+  private sampleFrameAt(
+    u: number,
+    tangentOut: THREE.Vector3,
+    rightOut: THREE.Vector3,
+    upOut: THREE.Vector3
+  ): void {
+    const f = Math.max(0, Math.min(this.lengthSegments, u * this.lengthSegments));
+    const i0 = Math.floor(f);
+    const i1 = Math.min(this.lengthSegments, i0 + 1);
+    const t = f - i0;
+
+    tangentOut.copy(this.frameTangents[i0]).lerp(this.frameTangents[i1], t).normalize();
+    this.tempNormal.copy(this.frameNormals[i0]).lerp(this.frameNormals[i1], t).normalize();
+    this.tempBinormal.copy(this.frameBinormals[i0]).lerp(this.frameBinormals[i1], t).normalize();
+
+    rightOut.copy(this.tempNormal);
+    upOut.copy(this.tempBinormal);
+  }
+
+  private refreshFrenetFrames(): void {
+    const frames = this.centerlineCurve.computeFrenetFrames(this.lengthSegments, false);
+    for (let i = 0; i <= this.lengthSegments; i += 1) {
+      this.frameTangents[i].copy(frames.tangents[i]);
+      this.frameNormals[i].copy(frames.normals[i]);
+      this.frameBinormals[i].copy(frames.binormals[i]);
     }
-    this.tempUp.crossVectors(this.tempRight, tangent).normalize();
   }
 
   private smoothstep(edge0: number, edge1: number, x: number): number {
