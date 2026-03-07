@@ -20,6 +20,9 @@ export class Track {
   private readonly tempTangent = new THREE.Vector3();
   private readonly tempQuat = new THREE.Quaternion();
   private readonly tempRollQuat = new THREE.Quaternion();
+  private riderHeight = 0;
+  private riderBank = 0;
+  private riderPitch = 0;
 
   private readonly rails: THREE.Mesh[] = [];
   private readonly edgeGlows: THREE.Mesh[] = [];
@@ -196,6 +199,14 @@ export class Track {
       segment.mesh.position.copy(this.tempPoint);
       segment.mesh.quaternion.copy(this.tempQuat).multiply(this.tempRollQuat);
     }
+
+    // Sample rider pose at the near segment of the spline so the player can ride the track.
+    this.centerlineCurve.getPointAt(0, this.tempPoint);
+    this.centerlineCurve.getTangentAt(0.001, this.tempTangent).normalize();
+    const forwardLen = Math.max(1e-6, Math.hypot(this.tempTangent.x, this.tempTangent.z));
+    this.riderPitch = Math.atan2(this.tempTangent.y, forwardLen);
+    this.riderBank = this.bank * 0.92 + Math.sin(this.waveTime * 1.9) * this.curve * 0.02;
+    this.riderHeight = this.tempPoint.y;
   }
 
   public setControlProfile(elevation: number, curvature: number, pace: number, feature: number): void {
@@ -233,6 +244,14 @@ export class Track {
     this.edgeGlowMaterial.emissive.copy(this.tempColor);
     this.edgeGlowMaterial.emissiveIntensity = 0.8 + energy * 2.4 + fever * 2.1;
     this.edgeGlowMaterial.opacity = 0.45 + energy * 0.45;
+  }
+
+  public getRiderPose(): Readonly<{ height: number; bank: number; pitch: number }> {
+    return {
+      height: this.riderHeight,
+      bank: this.riderBank,
+      pitch: this.riderPitch
+    };
   }
 
   private makeRoadTexture(): THREE.CanvasTexture {
@@ -283,6 +302,10 @@ export class Track {
     const points = this.centerlinePoints;
     for (let i = 0; i < points.length; i += 1) {
       const u = i / (points.length - 1);
+      if (i === 0) {
+        points[i].set(0, 0, 0);
+        continue;
+      }
       // Keep the ride shape alive near the player instead of flattening out.
       const damp = 0.55 + 0.45 * this.smoothstep(0.03, 1, u);
       const laneSafeDamp = 0.52 + 0.48 * this.smoothstep(0.18, 1, u);

@@ -11,8 +11,10 @@ export class MovementSystem {
   ) {}
 
   public update(deltaTime: number): void {
-    this.player.update();
     this.track.update(deltaTime);
+    const pose = this.track.getRiderPose();
+    this.player.setTrackPose(pose.height, pose.bank, pose.pitch);
+    this.player.update();
     this.noteSpawner.updateActiveNotes(deltaTime, TRACK_SPEED);
   }
 }
