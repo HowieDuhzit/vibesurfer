@@ -47,6 +47,15 @@ export interface GeneratorDebugData {
   };
 }
 
+export interface RuntimeControlSample {
+  elevation: number;
+  curvature: number;
+  pace: number;
+  density: number;
+  danger: number;
+  feature: number;
+}
+
 export class BeatMapGenerator {
   private readonly queue: SpawnEvent[] = [];
   private readonly beatMarkerQueue: BeatMarkerEvent[] = [];
@@ -68,6 +77,17 @@ export class BeatMapGenerator {
   private timingOffsetSeconds = 0.01;
   private minNoteGapSeconds = 0.14;
   private difficulty: "chill" | "normal" | "hyper" = "normal";
+  private activeSongDuration = 1;
+  private activeTrack: TrackPlan | null = null;
+  private activeNovelty: Float32Array | null = null;
+  private readonly runtimeSample: RuntimeControlSample = {
+    elevation: 0,
+    curvature: 0,
+    pace: 0,
+    density: 0,
+    danger: 0,
+    feature: 0
+  };
 
   private debugData: GeneratorDebugData = {
     bpm: 120,
@@ -104,6 +124,10 @@ export class BeatMapGenerator {
     }
 
     const { song, rhythm, structure, track } = this.getOrAnalyze(buffer);
+
+    this.activeSongDuration = Math.max(1e-6, song.duration);
+    this.activeTrack = track;
+    this.activeNovelty = structure.noveltyEnvelope;
 
     this.debugData = {
       bpm: rhythm.bpm,
@@ -177,6 +201,8 @@ export class BeatMapGenerator {
   public clear(): void {
     this.queue.length = 0;
     this.beatMarkerQueue.length = 0;
+    this.activeTrack = null;
+    this.activeNovelty = null;
   }
 
   public setSeed(seed: number): void {
@@ -198,6 +224,30 @@ export class BeatMapGenerator {
 
   public getPendingCount(): number {
     return this.queue.length;
+  }
+
+  public sampleRuntimeControl(audioTime: number): Readonly<RuntimeControlSample> {
+    const track = this.activeTrack;
+    if (!track || track.elevation.length === 0) {
+      this.runtimeSample.elevation = 0;
+      this.runtimeSample.curvature = 0;
+      this.runtimeSample.pace = 0;
+      this.runtimeSample.density = 0;
+      this.runtimeSample.danger = 0;
+      this.runtimeSample.feature = 0;
+      return this.runtimeSample;
+    }
+
+    const normalized = Math.max(0, Math.min(0.99999, audioTime / this.activeSongDuration));
+    const index = Math.max(0, Math.min(track.elevation.length - 1, Math.floor(normalized * track.elevation.length)));
+
+    this.runtimeSample.elevation = track.elevation[index] ?? 0;
+    this.runtimeSample.curvature = track.curvature[index] ?? 0;
+    this.runtimeSample.pace = track.pace[index] ?? 0;
+    this.runtimeSample.density = track.eventDensity[index] ?? 0;
+    this.runtimeSample.danger = track.dangerLevel[index] ?? 0;
+    this.runtimeSample.feature = track.featureEligibility[index] ?? 0;
+    return this.runtimeSample;
   }
 
   public setTimingOffsetMs(ms: number): void {

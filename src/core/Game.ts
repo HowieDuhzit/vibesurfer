@@ -612,6 +612,10 @@ export class Game {
       this.beatMapGenerator.popSpawnEvents(audioTime, this.pendingSpawnEvents);
       this.spawner.updateSpawnEvents(this.pendingSpawnEvents);
 
+      const control = this.beatMapGenerator.sampleRuntimeControl(audioTime);
+      this.track.setControlProfile(control.elevation, control.curvature, control.pace, control.feature);
+      this.cameraController.setTrackMotion(control.curvature, control.elevation, control.pace);
+
       this.movementSystem.update(time.deltaTime);
       this.collisionSystem.update(time.deltaTime);
 
@@ -633,6 +637,8 @@ export class Game {
       this.frequencySideRailsEffect.update(time.deltaTime, 0.08, 0.06, 0.12);
       this.musicVisualizerBackground.update(time.deltaTime, 0, 0, 0);
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, 0.08, 0.06, 0);
+      this.track.setControlProfile(0, 0, 0, 0);
+      this.cameraController.setTrackMotion(0, 0, 0);
       this.movementSystem.update(time.deltaTime);
       this.particleSystem.update(time.deltaTime);
     }

@@ -16,6 +16,12 @@ export class Track {
 
   private readonly rails: THREE.Mesh[] = [];
   private readonly edgeGlows: THREE.Mesh[] = [];
+  private targetLift = 0;
+  private targetBank = 0;
+  private targetForwardLean = 0;
+  private lift = 0;
+  private bank = 0;
+  private forwardLean = 0;
 
   public constructor() {
     const width = LANE_WIDTH * (LANES + 1);
@@ -135,6 +141,26 @@ export class Track {
 
       segment.mesh.position.z = segment.zPosition;
     }
+
+    const smoothing = Math.min(1, deltaTime * 4.6);
+    this.lift += (this.targetLift - this.lift) * smoothing;
+    this.bank += (this.targetBank - this.bank) * smoothing;
+    this.forwardLean += (this.targetForwardLean - this.forwardLean) * smoothing;
+
+    this.group.position.y = this.lift;
+    this.group.rotation.z = this.bank;
+    this.group.rotation.x = this.forwardLean;
+  }
+
+  public setControlProfile(elevation: number, curvature: number, pace: number, feature: number): void {
+    const e = Math.max(0, Math.min(1, elevation));
+    const c = Math.max(-1, Math.min(1, curvature));
+    const p = Math.max(0, Math.min(1, pace));
+    const f = Math.max(0, Math.min(1, feature));
+
+    this.targetLift = e * 0.36 + f * 0.1;
+    this.targetBank = c * (0.06 + p * 0.07);
+    this.targetForwardLean = -0.01 - p * 0.025;
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {

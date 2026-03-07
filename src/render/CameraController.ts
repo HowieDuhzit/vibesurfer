@@ -8,6 +8,12 @@ export class CameraController {
   private baseFov: number;
   private fovPulseEnabled = true;
   private noiseTime = 0;
+  private targetTrackBank = 0;
+  private targetTrackLift = 0;
+  private targetTrackPace = 0;
+  private trackBank = 0;
+  private trackLift = 0;
+  private trackPace = 0;
 
   public constructor(
     private readonly camera: THREE.PerspectiveCamera,
@@ -29,17 +35,32 @@ export class CameraController {
       this.shakeOffset.set(0, 0, 0);
     }
 
+    const smoothing = Math.min(1, deltaTime * 5);
+    this.trackBank += (this.targetTrackBank - this.trackBank) * smoothing;
+    this.trackLift += (this.targetTrackLift - this.trackLift) * smoothing;
+    this.trackPace += (this.targetTrackPace - this.trackPace) * smoothing;
+
     this.camera.position.copy(this.basePosition).add(this.shakeOffset);
+    this.camera.position.x += this.trackBank * 0.9;
+    this.camera.position.y += this.trackLift * 0.65;
+    this.camera.position.z -= this.trackPace * 0.5;
     const pulse = this.fovPulseEnabled ? Math.max(0, Math.min(1, fovPulse)) : 0;
-    this.camera.fov = this.baseFov + pulse * 2.8;
+    this.camera.fov = this.baseFov + pulse * 2.8 + this.trackPace * 1.6;
     this.camera.updateProjectionMatrix();
     this.lookAtTarget.copy(this.player.position);
-    this.lookAtTarget.y += 0.2;
-    this.lookAtTarget.z -= 4;
+    this.lookAtTarget.y += 0.2 + this.trackLift * 0.35;
+    this.lookAtTarget.x += this.trackBank * 0.4;
+    this.lookAtTarget.z -= 4 + this.trackPace * 0.45;
     this.camera.lookAt(this.lookAtTarget);
   }
 
   public setFovPulseEnabled(enabled: boolean): void {
     this.fovPulseEnabled = enabled;
+  }
+
+  public setTrackMotion(curvature: number, elevation: number, pace: number): void {
+    this.targetTrackBank = Math.max(-1, Math.min(1, curvature)) * 0.22;
+    this.targetTrackLift = Math.max(0, Math.min(1, elevation)) * 0.55;
+    this.targetTrackPace = Math.max(0, Math.min(1, pace));
   }
 }
