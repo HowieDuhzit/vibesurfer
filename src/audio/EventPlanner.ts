@@ -120,7 +120,8 @@ export class EventPlanner {
     }
 
     events.sort((a, b) => a.beatTime - b.beatTime);
-    return this.playabilityPass(events, options.minGapSeconds, beatSeconds);
+    const playable = this.playabilityPass(events, options.minGapSeconds, beatSeconds);
+    return this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom);
   }
 
   private buildCandidates(song: SongAnalysis, rhythm: RhythmAnalysis, track: TrackPlan): Candidate[] {
@@ -289,6 +290,7 @@ export class EventPlanner {
     const out: SpawnEvent[] = [];
     let lastTime = -Infinity;
     let lastLane = 1;
+    let streak = 0;
 
     for (let i = 0; i < events.length; i += 1) {
       const e = events[i];
@@ -301,9 +303,103 @@ export class EventPlanner {
         continue;
       }
 
+      if (e.lane === lastLane) {
+        streak += 1;
+        if (streak >= 4) {
+          continue;
+        }
+      } else {
+        streak = 0;
+      }
+
       out.push(e);
       lastTime = e.beatTime;
       lastLane = e.lane;
+    }
+
+    return out;
+  }
+
+  private normalizeDensity(
+    events: SpawnEvent[],
+    duration: number,
+    difficulty: "chill" | "normal" | "hyper",
+    nextRandom: () => number
+  ): SpawnEvent[] {
+    if (events.length <= 3 || duration <= 0.5) {
+      return events;
+    }
+
+    const targetNps = difficulty === "hyper" ? 2.9 : difficulty === "chill" ? 1.35 : 2.1;
+    const maxEvents = Math.max(6, Math.floor(targetNps * duration));
+    const sorted = events.slice().sort((a, b) => a.beatTime - b.beatTime);
+
+    if (sorted.length > maxEvents) {
+      const keep = new Array<boolean>(sorted.length).fill(true);
+      let removeCount = sorted.length - maxEvents;
+      let idx = 1;
+
+      while (removeCount > 0 && idx < sorted.length - 1) {
+        const prev = sorted[idx - 1];
+        const cur = sorted[idx];
+        const next = sorted[idx + 1];
+        const localSpacing = (cur.beatTime - prev.beatTime) + (next.beatTime - cur.beatTime);
+        const removableType = cur.type === "tap" || cur.type === "double";
+        if (removableType && localSpacing < (difficulty === "hyper" ? 0.75 : 0.95)) {
+          keep[idx] = false;
+          removeCount -= 1;
+          idx += 2;
+          continue;
+        }
+        idx += 1;
+      }
+
+      if (removeCount > 0) {
+        for (let i = sorted.length - 2; i >= 1 && removeCount > 0; i -= 1) {
+          if (!keep[i]) {
+            continue;
+          }
+          if (sorted[i].type === "hold" || sorted[i].type === "slide") {
+            continue;
+          }
+          if (nextRandom() < 0.7) {
+            keep[i] = false;
+            removeCount -= 1;
+          }
+        }
+      }
+
+      const filtered: SpawnEvent[] = [];
+      for (let i = 0; i < sorted.length; i += 1) {
+        if (keep[i]) {
+          filtered.push(sorted[i]);
+        }
+      }
+      return this.injectRests(filtered, difficulty);
+    }
+
+    return this.injectRests(sorted, difficulty);
+  }
+
+  private injectRests(events: SpawnEvent[], difficulty: "chill" | "normal" | "hyper"): SpawnEvent[] {
+    if (events.length <= 8) {
+      return events;
+    }
+
+    const out: SpawnEvent[] = [];
+    const restEvery = difficulty === "hyper" ? 20 : difficulty === "chill" ? 12 : 16;
+    const restDuration = difficulty === "hyper" ? 0.48 : 0.62;
+    let lastAccepted = -Infinity;
+
+    for (let i = 0; i < events.length; i += 1) {
+      const e = events[i];
+      if (i > 0 && i % restEvery === 0) {
+        if (e.beatTime - lastAccepted < restDuration) {
+          continue;
+        }
+      }
+      out.push(e);
+      lastAccepted = e.beatTime;
     }
 
     return out;

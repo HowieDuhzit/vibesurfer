@@ -29,6 +29,13 @@ export interface GeneratorDebugData {
   beatConfidence: number;
   sections: SongSection[];
   anchors: number[];
+  diagnostics: {
+    notes: number;
+    nps: number;
+    lane0: number;
+    lane1: number;
+    lane2: number;
+  };
   plan: {
     elevation: readonly number[];
     curvature: readonly number[];
@@ -61,6 +68,13 @@ export class BeatMapGenerator {
     beatConfidence: 0,
     sections: [],
     anchors: [],
+    diagnostics: {
+      notes: 0,
+      nps: 0,
+      lane0: 0,
+      lane1: 0,
+      lane2: 0
+    },
     plan: {
       elevation: [],
       curvature: [],
@@ -93,6 +107,13 @@ export class BeatMapGenerator {
       beatConfidence: rhythm.confidence,
       sections: structure.sections,
       anchors: structure.bigMomentFrames.map((f) => song.frames[Math.max(0, Math.min(song.frames.length - 1, f))]?.time ?? 0),
+      diagnostics: {
+        notes: 0,
+        nps: 0,
+        lane0: 0,
+        lane1: 0,
+        lane2: 0
+      },
       plan: this.compactPlan(track, structure.noveltyEnvelope)
     };
 
@@ -108,6 +129,8 @@ export class BeatMapGenerator {
       this.queue.push(events[i]);
       this.lastGenerated.push(events[i]);
     }
+
+    this.updateDiagnostics(events, song.duration);
 
     this.buildBeatMarkerGrid(song, rhythm.beatFrames, travelTime);
 
@@ -221,6 +244,28 @@ export class BeatMapGenerator {
       danger: downsample(track.dangerLevel),
       feature: downsample(track.featureEligibility),
       novelty: downsample(novelty)
+    };
+  }
+
+  private updateDiagnostics(events: readonly SpawnEvent[], duration: number): void {
+    let lane0 = 0;
+    let lane1 = 0;
+    let lane2 = 0;
+    for (let i = 0; i < events.length; i += 1) {
+      if (events[i].lane === 0) {
+        lane0 += 1;
+      } else if (events[i].lane === 1) {
+        lane1 += 1;
+      } else {
+        lane2 += 1;
+      }
+    }
+    this.debugData.diagnostics = {
+      notes: events.length,
+      nps: events.length / Math.max(1, duration),
+      lane0,
+      lane1,
+      lane2
     };
   }
 

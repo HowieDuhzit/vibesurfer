@@ -464,7 +464,7 @@ function drawAnalysisDebug(): void {
   ctx.fillRect(0, 0, w, h);
 
   const debug = game.getGeneratorDebugData();
-  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Sections:${debug.sections.length} Anchors:${debug.anchors.length}`;
+  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Notes:${debug.diagnostics.notes} NPS:${debug.diagnostics.nps.toFixed(2)} Lanes:${debug.diagnostics.lane0}/${debug.diagnostics.lane1}/${debug.diagnostics.lane2} Sections:${debug.sections.length}`;
 
   const drawCurve = (values: readonly number[], color: string, yScale = 1): void => {
     if (values.length < 2) {
@@ -489,6 +489,8 @@ function drawAnalysisDebug(): void {
   drawCurve(debug.plan.elevation, "#38bdf8");
   drawCurve(debug.plan.density, "#a78bfa");
   drawCurve(debug.plan.danger, "#f59e0b");
+  drawCurve(debug.plan.feature, "rgba(34,197,94,0.85)");
+  drawCurve(debug.plan.novelty, "rgba(244,63,94,0.8)");
 
   const totalDuration = Math.max(1, debug.anchors.length > 0 ? debug.anchors[debug.anchors.length - 1] + 1 : 1);
   ctx.strokeStyle = "rgba(125, 211, 252, 0.35)";
