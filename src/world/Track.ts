@@ -16,18 +16,25 @@ export class Track {
 
   private readonly rails: THREE.Mesh[] = [];
   private readonly edgeGlows: THREE.Mesh[] = [];
+  private readonly laneLines: THREE.Mesh[] = [];
+
   private targetLift = 0;
   private targetBank = 0;
   private targetForwardLean = 0;
+  private targetCurve = 0;
+  private targetPace = 0;
+
   private lift = 0;
   private bank = 0;
   private forwardLean = 0;
+  private curve = 0;
+  private pace = 0;
+  private waveTime = 0;
 
   public constructor() {
     const width = LANE_WIDTH * (LANES + 1);
     const roadTexture = this.makeRoadTexture();
 
-    const segmentGeometry = new THREE.PlaneGeometry(width, SEGMENT_LENGTH);
     this.segmentMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x0b1228,
       roughness: 0.5,
@@ -39,18 +46,6 @@ export class Track {
       map: roadTexture
     });
 
-    for (let i = 0; i < SEGMENT_COUNT; i += 1) {
-      const segmentMesh = new THREE.Mesh(segmentGeometry, this.segmentMaterial);
-      segmentMesh.rotation.x = -Math.PI * 0.5;
-      segmentMesh.receiveShadow = true;
-      const z = -i * SEGMENT_LENGTH;
-
-      const segment = new TrackSegment(segmentMesh, z);
-      this.segments.push(segment);
-      this.group.add(segment.mesh);
-    }
-
-    const lineGeometry = new THREE.BoxGeometry(0.08, 0.06, this.totalLength);
     this.lineMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x38bdf8,
       emissive: 0x38bdf8,
@@ -60,14 +55,6 @@ export class Track {
       clearcoat: 0.3,
       clearcoatRoughness: 0.2
     });
-
-    for (let i = 0; i <= LANES; i += 1) {
-      const offset = (i - LANES / 2) * LANE_WIDTH;
-      const line = new THREE.Mesh(lineGeometry, this.lineMaterial);
-      line.position.set(offset, 0.03, -this.totalLength * 0.5);
-      line.castShadow = true;
-      this.group.add(line);
-    }
 
     this.sideMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x111827,
@@ -99,57 +86,93 @@ export class Track {
       opacity: 0.8
     });
 
-    const shoulderWidth = 1.65;
-    const sideHeight = 0.24;
-    const sideGeometry = new THREE.BoxGeometry(shoulderWidth, sideHeight, this.totalLength);
-    const sideRailGeometry = new THREE.CylinderGeometry(0.06, 0.06, this.totalLength, 10);
-    const sideGlowGeometry = new THREE.BoxGeometry(0.02, 0.13, this.totalLength);
-
+    const segmentRoadGeometry = new THREE.PlaneGeometry(width, SEGMENT_LENGTH * 1.06);
+    const lineGeometry = new THREE.BoxGeometry(0.08, 0.05, SEGMENT_LENGTH * 0.96);
+    const shoulderWidth = 1.68;
+    const shoulderHeight = 0.22;
+    const sideGeometry = new THREE.BoxGeometry(shoulderWidth, shoulderHeight, SEGMENT_LENGTH * 1.03);
+    const railGeometry = new THREE.CylinderGeometry(0.06, 0.06, SEGMENT_LENGTH * 1.02, 10);
+    const glowGeometry = new THREE.BoxGeometry(0.03, 0.13, SEGMENT_LENGTH * 0.98);
     const halfTrack = width * 0.5;
-    for (let i = -1; i <= 1; i += 2) {
-      const side = new THREE.Mesh(sideGeometry, this.sideMaterial);
-      side.position.set(i * (halfTrack + shoulderWidth * 0.48), sideHeight * 0.5 - 0.02, -this.totalLength * 0.5);
-      side.receiveShadow = true;
-      side.castShadow = true;
-      this.group.add(side);
 
-      const rail = new THREE.Mesh(sideRailGeometry, this.railMaterial);
-      rail.rotation.x = Math.PI * 0.5;
-      rail.position.set(i * (halfTrack + 0.68), 0.28, -this.totalLength * 0.5);
-      rail.castShadow = true;
-      this.group.add(rail);
-      this.rails.push(rail);
+    for (let i = 0; i < SEGMENT_COUNT; i += 1) {
+      const root = new THREE.Group();
+      const road = new THREE.Mesh(segmentRoadGeometry, this.segmentMaterial);
+      road.rotation.x = -Math.PI * 0.5;
+      road.receiveShadow = true;
+      root.add(road);
 
-      const glow = new THREE.Mesh(sideGlowGeometry, this.edgeGlowMaterial);
-      glow.position.set(i * (halfTrack + 0.04), 0.1, -this.totalLength * 0.5);
-      glow.renderOrder = 2;
-      this.group.add(glow);
-      this.edgeGlows.push(glow);
+      const laneLines: THREE.Mesh[] = [];
+      for (let lane = 0; lane <= LANES; lane += 1) {
+        const offset = (lane - LANES / 2) * LANE_WIDTH;
+        const line = new THREE.Mesh(lineGeometry, this.lineMaterial);
+        line.position.set(offset, 0.03, 0);
+        line.castShadow = true;
+        root.add(line);
+        laneLines.push(line);
+        this.laneLines.push(line);
+      }
+
+      const rails: THREE.Mesh[] = [];
+      const glows: THREE.Mesh[] = [];
+      for (let side = -1; side <= 1; side += 2) {
+        const shoulder = new THREE.Mesh(sideGeometry, this.sideMaterial);
+        shoulder.position.set(side * (halfTrack + shoulderWidth * 0.48), shoulderHeight * 0.5 - 0.02, 0);
+        shoulder.receiveShadow = true;
+        shoulder.castShadow = true;
+        root.add(shoulder);
+
+        const rail = new THREE.Mesh(railGeometry, this.railMaterial);
+        rail.rotation.x = Math.PI * 0.5;
+        rail.position.set(side * (halfTrack + 0.68), 0.28, 0);
+        rail.castShadow = true;
+        root.add(rail);
+        rails.push(rail);
+        this.rails.push(rail);
+
+        const glow = new THREE.Mesh(glowGeometry, this.edgeGlowMaterial);
+        glow.position.set(side * (halfTrack + 0.04), 0.1, 0);
+        glow.renderOrder = 2;
+        root.add(glow);
+        glows.push(glow);
+        this.edgeGlows.push(glow);
+      }
+
+      const z = -i * SEGMENT_LENGTH;
+      const segment = new TrackSegment(root, z, laneLines, rails, glows);
+      this.segments.push(segment);
+      this.group.add(root);
     }
   }
 
   public update(deltaTime: number): void {
     const step = TRACK_SPEED * deltaTime;
+    this.waveTime += deltaTime * (0.5 + this.pace * 0.9);
+
+    const smoothing = Math.min(1, deltaTime * 4.8);
+    this.lift += (this.targetLift - this.lift) * smoothing;
+    this.bank += (this.targetBank - this.bank) * smoothing;
+    this.forwardLean += (this.targetForwardLean - this.forwardLean) * smoothing;
+    this.curve += (this.targetCurve - this.curve) * smoothing;
+    this.pace += (this.targetPace - this.pace) * smoothing;
 
     for (let i = 0; i < this.segments.length; i += 1) {
       const segment = this.segments[i];
       segment.zPosition += step;
-
       if (segment.zPosition > SEGMENT_LENGTH) {
         segment.zPosition -= this.totalLength;
       }
 
-      segment.mesh.position.z = segment.zPosition;
+      const depthNorm = Math.max(0, Math.min(1, 1 - (-segment.zPosition / this.totalLength)));
+      const phase = i * 0.52 + this.waveTime * (0.7 + this.pace * 0.6);
+      const lateral = Math.sin(phase) * this.curve * (0.85 + depthNorm * 0.95);
+      const lift = this.lift * (0.32 + depthNorm * 0.72) + Math.sin(phase * 0.62) * this.lift * 0.2;
+      const bank = this.bank * (0.5 + depthNorm * 0.75) + Math.sin(phase * 0.86) * this.curve * 0.08;
+      const pitch = -Math.PI * 0.5 + this.forwardLean + Math.cos(phase * 0.44) * this.lift * 0.07;
+
+      segment.mesh.position.set(lateral, lift, segment.zPosition);
+      segment.mesh.rotation.set(pitch, 0, bank);
     }
-
-    const smoothing = Math.min(1, deltaTime * 4.6);
-    this.lift += (this.targetLift - this.lift) * smoothing;
-    this.bank += (this.targetBank - this.bank) * smoothing;
-    this.forwardLean += (this.targetForwardLean - this.forwardLean) * smoothing;
-
-    this.group.position.y = this.lift;
-    this.group.rotation.z = this.bank;
-    this.group.rotation.x = this.forwardLean;
   }
 
   public setControlProfile(elevation: number, curvature: number, pace: number, feature: number): void {
@@ -158,9 +181,11 @@ export class Track {
     const p = Math.max(0, Math.min(1, pace));
     const f = Math.max(0, Math.min(1, feature));
 
-    this.targetLift = e * 0.36 + f * 0.1;
-    this.targetBank = c * (0.06 + p * 0.07);
-    this.targetForwardLean = -0.01 - p * 0.025;
+    this.targetLift = e * 0.6 + f * 0.22;
+    this.targetBank = c * (0.04 + p * 0.08);
+    this.targetCurve = c * (0.24 + p * 0.35 + f * 0.15);
+    this.targetPace = p;
+    this.targetForwardLean = -0.008 - p * 0.02;
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
@@ -226,7 +251,7 @@ export class Track {
     const tex = new THREE.CanvasTexture(canvas);
     tex.wrapS = THREE.RepeatWrapping;
     tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(1, SEGMENT_COUNT * 0.65);
+    tex.repeat.set(1, SEGMENT_COUNT * 0.72);
     tex.anisotropy = 8;
     return tex;
   }
