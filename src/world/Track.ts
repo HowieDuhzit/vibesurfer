@@ -46,6 +46,8 @@ export class Track {
   private readonly tempAxis = new THREE.Vector3();
   private readonly tempPrevTangent = new THREE.Vector3();
   private readonly tempRotateQuat = new THREE.Quaternion();
+  private readonly deformA = new THREE.Vector2();
+  private readonly deformB = new THREE.Vector2();
   private readonly frameTangents: THREE.Vector3[] = [];
   private readonly frameNormals: THREE.Vector3[] = [];
   private readonly frameBinormals: THREE.Vector3[] = [];
@@ -250,26 +252,49 @@ export class Track {
   }
 
   private refreshCenterlineSpline(): void {
+    const riderU = this.trackZToU(0);
+    this.computeDeformAt(riderU, this.deformA);
+    this.computeDeformAt(Math.min(1, riderU + 0.01), this.deformB);
+    const slopeX = (this.deformB.x - this.deformA.x) / 0.01;
+    const slopeY = (this.deformB.y - this.deformA.y) / 0.01;
+
     for (let i = 0; i < this.centerlinePoints.length; i += 1) {
       const u = i / (this.centerlinePoints.length - 1);
-
-      const damp = 0.6 + 0.4 * this.smoothstep(0.04, 1, u);
-      const phase = (u * (1.22 + this.pace * 1.5) + this.waveTime * (0.14 + this.pace * 0.12)) * Math.PI * 2;
-      const phase2 = phase * 0.7 + 0.9;
-
-      const lateralA = Math.sin(phase) * this.curve * (0.1 + damp * 0.72);
-      const lateralB = Math.sin(phase * 0.48 + 1.4) * this.curve * 0.24 * damp;
-      const lateral = lateralA + lateralB;
-
-      const baseLift = this.lift * (0.08 + damp * 0.92);
-      const hillA = Math.sin(phase2) * this.lift * 0.38 * damp;
-      const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.22 * damp;
-      const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.13 * damp;
-      const slope = this.forwardLean * u * this.totalCurveLength * 0.1;
-      const y = baseLift + hillA + hillB + drop + slope;
+      let lateral: number;
+      let y: number;
+      if (u < riderU) {
+        const du = u - riderU;
+        // Rear extension follows the same local tangent as the player zone,
+        // instead of introducing a separate motion "section".
+        lateral = this.deformA.x + slopeX * du * 0.35;
+        y = this.deformA.y + slopeY * du * 0.35;
+      } else {
+        this.computeDeformAt(u, this.deformB);
+        lateral = this.deformB.x;
+        y = this.deformB.y;
+      }
 
       this.centerlinePoints[i].set(lateral, y, this.rearLength + this.frontPadding - u * this.totalCurveLength);
     }
+  }
+
+  private computeDeformAt(u: number, out: THREE.Vector2): void {
+    const damp = 0.6 + 0.4 * this.smoothstep(0.04, 1, u);
+    const phase = (u * (1.22 + this.pace * 1.5) + this.waveTime * (0.14 + this.pace * 0.12)) * Math.PI * 2;
+    const phase2 = phase * 0.7 + 0.9;
+
+    const lateralA = Math.sin(phase) * this.curve * (0.1 + damp * 0.72);
+    const lateralB = Math.sin(phase * 0.48 + 1.4) * this.curve * 0.24 * damp;
+    const lateral = lateralA + lateralB;
+
+    const baseLift = this.lift * (0.08 + damp * 0.92);
+    const hillA = Math.sin(phase2) * this.lift * 0.38 * damp;
+    const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.22 * damp;
+    const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.13 * damp;
+    const slope = this.forwardLean * u * this.totalCurveLength * 0.1;
+    const y = baseLift + hillA + hillB + drop + slope;
+
+    out.set(lateral, y);
   }
 
   private updateWarpedGeometry(): void {
