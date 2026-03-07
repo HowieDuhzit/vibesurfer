@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { AudioAnalyzer } from "../audio/AudioAnalyzer";
 import { AudioManager } from "../audio/AudioManager";
 import { BeatDetector } from "../audio/BeatDetector";
-import { BeatMapGenerator, SpawnEvent } from "../audio/BeatMapGenerator";
+import { BeatMapGenerator, GeneratorDebugData, SpawnEvent } from "../audio/BeatMapGenerator";
 import { BeatPulseEffect } from "../effects/BeatPulseEffect";
 import { ComboRingEffect } from "../effects/ComboRingEffect";
 import { FrequencySideRailsEffect } from "../effects/FrequencySideRailsEffect";
@@ -379,6 +379,10 @@ export class Game {
       lane2,
       nps: preview.length / duration
     };
+  }
+
+  public getGeneratorDebugData(): Readonly<GeneratorDebugData> {
+    return this.beatMapGenerator.getDebugData();
   }
 
   public getScoreState(): Readonly<{

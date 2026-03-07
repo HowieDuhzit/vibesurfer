@@ -43,6 +43,8 @@ const mirrorLanesInput = byId<HTMLInputElement>("mirror-lanes");
 const seedInput = byId<HTMLInputElement>("seed-input");
 const applySeedButton = byId<HTMLButtonElement>("apply-seed");
 const chartSummaryLabel = byId<HTMLDivElement>("chart-summary");
+const analysisCanvas = byId<HTMLCanvasElement>("analysis-canvas");
+const analysisMetaLabel = byId<HTMLDivElement>("analysis-meta");
 
 const timingOffsetInput = byId<HTMLInputElement>("timing-offset");
 const timingOffsetLabel = byId<HTMLSpanElement>("timing-offset-label");
@@ -254,6 +256,7 @@ const updateHud = (): void => {
 
   const chart = game.getChartPreviewSummary();
   chartSummaryLabel.textContent = `Chart N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}`;
+  drawAnalysisDebug();
 
   const debug = game.getDebugState();
   const perf = game.getPerformanceState();
@@ -309,6 +312,7 @@ fileInput.addEventListener("change", async () => {
   await game.loadAudioFile(file);
   playButton.disabled = false;
   resultPanel.classList.remove("show");
+  drawAnalysisDebug();
 });
 
 playButton.addEventListener("click", async () => {
@@ -365,6 +369,7 @@ timingOffsetInput.addEventListener("input", () => {
 applySeedButton.addEventListener("click", () => {
   const seed = Number(seedInput.value || "123456789");
   game.setSeed(seed);
+  drawAnalysisDebug();
 });
 
 calibrateButton.addEventListener("click", () => {
@@ -445,3 +450,55 @@ window.addEventListener("beforeunload", () => {
   cancelAnimationFrame(hudRaf);
   game.stop();
 });
+
+function drawAnalysisDebug(): void {
+  const ctx = analysisCanvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+
+  const w = analysisCanvas.width;
+  const h = analysisCanvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#020617";
+  ctx.fillRect(0, 0, w, h);
+
+  const debug = game.getGeneratorDebugData();
+  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Sections:${debug.sections.length} Anchors:${debug.anchors.length}`;
+
+  const drawCurve = (values: readonly number[], color: string, yScale = 1): void => {
+    if (values.length < 2) {
+      return;
+    }
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.7;
+    for (let i = 0; i < values.length; i += 1) {
+      const x = (i / (values.length - 1)) * (w - 1);
+      const v = Math.max(0, Math.min(1, values[i] * yScale));
+      const y = h - 8 - v * (h - 16);
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
+  };
+
+  drawCurve(debug.plan.elevation, "#38bdf8");
+  drawCurve(debug.plan.density, "#a78bfa");
+  drawCurve(debug.plan.danger, "#f59e0b");
+
+  const totalDuration = Math.max(1, debug.anchors.length > 0 ? debug.anchors[debug.anchors.length - 1] + 1 : 1);
+  ctx.strokeStyle = "rgba(125, 211, 252, 0.35)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < debug.anchors.length; i += 1) {
+    const t = debug.anchors[i];
+    const x = (t / totalDuration) * w;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+}
