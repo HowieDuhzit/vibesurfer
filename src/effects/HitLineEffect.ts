@@ -1,15 +1,18 @@
 import * as THREE from "three";
 import { HIT_LINE_Z_OFFSET, LANE_WIDTH, LANES } from "../core/Config";
+import { Track } from "../world/Track";
 
 export class HitLineEffect {
   private readonly mesh: THREE.Mesh;
   private readonly material: THREE.MeshStandardMaterial;
   private readonly color = new THREE.Color();
   private readonly missColor = new THREE.Color(0xf43f5e);
+  private readonly worldPos = new THREE.Vector3();
+  private readonly worldQuat = new THREE.Quaternion();
   private hitBoost = 0;
   private missCrack = 0;
 
-  public constructor(scene: THREE.Scene) {
+  public constructor(scene: THREE.Scene, private readonly track: Track) {
     const geometry = new THREE.BoxGeometry(LANE_WIDTH * (LANES + 1), 0.03, 0.36);
     this.material = new THREE.MeshPhysicalMaterial({
       color: 0xbfdbfe,
@@ -41,6 +44,11 @@ export class HitLineEffect {
 
     const pulse = 1 + bass * 0.35 + this.hitBoost * 0.16 + this.missCrack * 0.08;
     this.mesh.scale.set(1, 1, pulse);
+
+    this.track.sampleLanePoint(HIT_LINE_Z_OFFSET, 0, 0.08, this.worldPos);
+    this.track.sampleLaneQuaternion(HIT_LINE_Z_OFFSET, 0, this.worldQuat);
+    this.mesh.position.copy(this.worldPos);
+    this.mesh.quaternion.copy(this.worldQuat);
   }
 
   public triggerHit(strength = 1): void {

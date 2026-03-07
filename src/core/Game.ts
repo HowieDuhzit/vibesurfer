@@ -112,9 +112,9 @@ export class Game {
     this.scoreSystem = new ScoreSystem();
     this.particleSystem = new ParticleSystem(this.sceneManager.scene);
     this.musicVisualizerBackground = new MusicVisualizerBackground(this.sceneManager.scene);
-    this.frequencySideRailsEffect = new FrequencySideRailsEffect(this.sceneManager.scene);
+    this.frequencySideRailsEffect = new FrequencySideRailsEffect(this.sceneManager.scene, this.track);
     this.playerTrailEffect = new PlayerTrailEffect(this.sceneManager.scene);
-    this.hitLineEffect = new HitLineEffect(this.sceneManager.scene);
+    this.hitLineEffect = new HitLineEffect(this.sceneManager.scene, this.track);
     this.comboRingEffect = new ComboRingEffect(this.sceneManager.scene, this.player);
 
     this.movementSystem = new MovementSystem(this.player, this.track, this.spawner);

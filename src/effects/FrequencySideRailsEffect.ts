@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { HIT_LINE_Z_OFFSET, LANE_WIDTH, LANES } from "../core/Config";
+import { Track } from "../world/Track";
 
 export class FrequencySideRailsEffect {
   private readonly barsPerSide = 48;
@@ -7,11 +9,13 @@ export class FrequencySideRailsEffect {
   private readonly rightMesh: THREE.InstancedMesh;
   private readonly dummy = new THREE.Object3D();
   private readonly color = new THREE.Color();
+  private readonly worldPos = new THREE.Vector3();
+  private readonly worldQuat = new THREE.Quaternion();
   private scroll = 0;
   private intensityScale = 1;
   private qualityScale = 1;
 
-  public constructor(scene: THREE.Scene) {
+  public constructor(scene: THREE.Scene, private readonly track: Track) {
     const geometry = new THREE.BoxGeometry(0.14, 1, 0.22);
     const material = new THREE.MeshStandardMaterial({
       color: 0x60a5fa,
@@ -50,11 +54,11 @@ export class FrequencySideRailsEffect {
 
     const spanZ = 118;
     const stepZ = spanZ / this.barsPerSide;
-    const sideOffsetX = 4.35;
+    const sideOffsetX = (LANE_WIDTH * (LANES + 1)) * 0.5 + 1.9;
 
     const stride = this.qualityScale >= 0.95 ? 1 : this.qualityScale >= 0.6 ? 2 : 3;
     for (let i = 0; i < this.barsPerSide; i += 1) {
-      const z = -6 - i * stepZ;
+      const z = HIT_LINE_Z_OFFSET - 6 - i * stepZ;
       const bin = bins > 0 ? Math.min(bins - 1, Math.floor(((i + this.scroll) % this.barsPerSide) * (bins / this.barsPerSide))) : 0;
       const amp = bins > 0 ? (frequencyData as Uint8Array)[bin] / 255 : 0;
       const h = 0.22 + amp * (6.2 + clampedBass * 2.4) * this.intensityScale;
@@ -69,13 +73,18 @@ export class FrequencySideRailsEffect {
         continue;
       }
 
-      this.dummy.position.set(-sideOffsetX, h * 0.5, z);
-      this.dummy.rotation.set(0, 0, 0);
+      this.track.sampleLanePoint(z, -sideOffsetX, h * 0.5, this.worldPos);
+      this.track.sampleLaneQuaternion(z, 0, this.worldQuat);
+      this.dummy.position.copy(this.worldPos);
+      this.dummy.quaternion.copy(this.worldQuat);
       this.dummy.scale.set(1, h, 1);
       this.dummy.updateMatrix();
       this.leftMesh.setMatrixAt(i, this.dummy.matrix);
 
-      this.dummy.position.set(sideOffsetX, h * 0.5, z);
+      this.track.sampleLanePoint(z, sideOffsetX, h * 0.5, this.worldPos);
+      this.track.sampleLaneQuaternion(z, 0, this.worldQuat);
+      this.dummy.position.copy(this.worldPos);
+      this.dummy.quaternion.copy(this.worldQuat);
       this.dummy.updateMatrix();
       this.rightMesh.setMatrixAt(i, this.dummy.matrix);
     }
