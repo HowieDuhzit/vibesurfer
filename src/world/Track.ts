@@ -21,6 +21,7 @@ export class Track {
   private readonly trackWidth = LANE_WIDTH * (LANES + 1);
   private readonly centerlineCurve: THREE.CatmullRomCurve3;
   private readonly centerlinePoints: THREE.Vector3[];
+  private readonly worldUp = new THREE.Vector3(0, 1, 0);
 
   private readonly roadMaterial: THREE.MeshPhysicalMaterial;
   private readonly sideMaterial: THREE.MeshPhysicalMaterial;
@@ -324,6 +325,12 @@ export class Track {
     this.tempNormal.copy(this.frameNormals[i0]).lerp(this.frameNormals[i1], t).normalize();
     this.tempBinormal.copy(this.frameBinormals[i0]).lerp(this.frameBinormals[i1], t).normalize();
 
+    // Keep the road upright for readability; prevents occasional side flips.
+    if (this.tempBinormal.dot(this.worldUp) < 0) {
+      this.tempNormal.multiplyScalar(-1);
+      this.tempBinormal.multiplyScalar(-1);
+    }
+
     rightOut.copy(this.tempNormal);
     upOut.copy(this.tempBinormal);
   }
@@ -334,6 +341,19 @@ export class Track {
       this.frameTangents[i].copy(frames.tangents[i]);
       this.frameNormals[i].copy(frames.normals[i]);
       this.frameBinormals[i].copy(frames.binormals[i]);
+    }
+
+    // Enforce consistent frame orientation between adjacent samples to avoid
+    // sign flips that can turn the ribbon sideways for a frame.
+    for (let i = 1; i <= this.lengthSegments; i += 1) {
+      if (this.frameNormals[i].dot(this.frameNormals[i - 1]) < 0) {
+        this.frameNormals[i].multiplyScalar(-1);
+        this.frameBinormals[i].multiplyScalar(-1);
+      }
+      if (this.frameBinormals[i].dot(this.frameBinormals[i - 1]) < 0) {
+        this.frameNormals[i].multiplyScalar(-1);
+        this.frameBinormals[i].multiplyScalar(-1);
+      }
     }
   }
 
