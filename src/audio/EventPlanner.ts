@@ -24,6 +24,10 @@ interface SectionProfile {
   restBias: number;
 }
 
+interface PatternSpec {
+  lanes: readonly number[];
+}
+
 export class EventPlanner {
   public plan(
     song: SongAnalysis,
@@ -134,7 +138,9 @@ export class EventPlanner {
 
     events.sort((a, b) => a.beatTime - b.beatTime);
     const playable = this.playabilityPass(events, options.minGapSeconds, beatSeconds);
-    return this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom, sectionByFrame, sectionCounts);
+    const normalized = this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom, sectionByFrame, sectionCounts);
+    const patterned = this.applyPatternVocabulary(normalized, beatSeconds, options.difficulty, nextRandom, sectionByFrame, song.duration);
+    return this.survivabilityPass(patterned, beatSeconds, options.minGapSeconds, options.difficulty);
   }
 
   private buildCandidates(song: SongAnalysis, rhythm: RhythmAnalysis, track: TrackPlan): Candidate[] {
@@ -428,7 +434,9 @@ export class EventPlanner {
       }
       const sectionLoad = section >= 0 && section < sectionCounts.length ? sectionCounts[section] : 0;
       const heavySection = sectionLoad > 30;
-      const dynamicRestEvery = heavySection ? Math.max(8, restEvery - 4) : restEvery;
+      const restBias = this.profileForSection(section).restBias;
+      const biasAdjust = Math.round(restBias * 6);
+      const dynamicRestEvery = heavySection ? Math.max(8, restEvery - 4 + biasAdjust) : Math.max(8, restEvery + biasAdjust);
       const shouldRest = (i > 0 && i % dynamicRestEvery === 0) || acceptedInSection >= (heavySection ? 14 : 22);
       if (i > 0 && i % restEvery === 0) {
         if (e.beatTime - lastAccepted < restDuration) {
@@ -441,6 +449,135 @@ export class EventPlanner {
       out.push(e);
       lastAccepted = e.beatTime;
       acceptedInSection += 1;
+    }
+
+    return out;
+  }
+
+  private applyPatternVocabulary(
+    events: SpawnEvent[],
+    beatSeconds: number,
+    difficulty: "chill" | "normal" | "hyper",
+    nextRandom: () => number,
+    sectionByFrame: Int8Array,
+    duration: number
+  ): SpawnEvent[] {
+    if (events.length < 4 || beatSeconds <= 0.05) {
+      return events;
+    }
+
+    const out = events.map((e) => ({ ...e }));
+    const measureSeconds = beatSeconds * 4;
+    const windows = Math.max(1, Math.ceil(duration / Math.max(0.8, measureSeconds)));
+    const introPattern: PatternSpec = { lanes: [1, 1, 0, 1, 2, 1] };
+    const versePatterns: PatternSpec[] = [
+      { lanes: [1, 0, 1, 2, 1] },
+      { lanes: [0, 1, 2, 1] },
+      { lanes: [2, 1, 0, 1] }
+    ];
+    const chorusPatterns: PatternSpec[] = [
+      { lanes: [0, 2, 0, 2, 1, 2, 1, 0] },
+      { lanes: [0, 1, 2, 1, 0, 1, 2, 1] }
+    ];
+    const breakdownPatterns: PatternSpec[] = [
+      { lanes: [1, 2, 1, 0, 1] },
+      { lanes: [0, 1, 1, 2, 1] }
+    ];
+
+    let prevLane = out[0]?.lane ?? 1;
+    for (let w = 0; w < windows; w += 1) {
+      const t0 = w * measureSeconds;
+      const t1 = t0 + measureSeconds;
+      const bucket: number[] = [];
+      for (let i = 0; i < out.length; i += 1) {
+        const t = out[i].beatTime;
+        if (t >= t0 && t < t1) {
+          bucket.push(i);
+        }
+      }
+      if (bucket.length < 2) {
+        continue;
+      }
+
+      const midT = t0 + measureSeconds * 0.5;
+      const section = this.resolveSectionForTime(midT, sectionByFrame, duration);
+      let spec: PatternSpec;
+      if (section === 0 || section === 4) {
+        spec = introPattern;
+      } else if (section === 2) {
+        spec = chorusPatterns[Math.floor(nextRandom() * chorusPatterns.length)];
+      } else if (section === 3) {
+        spec = breakdownPatterns[Math.floor(nextRandom() * breakdownPatterns.length)];
+      } else {
+        spec = versePatterns[Math.floor(nextRandom() * versePatterns.length)];
+      }
+
+      const mirror = difficulty === "hyper" ? nextRandom() < 0.5 : nextRandom() < 0.35;
+      const maxStep = difficulty === "hyper" ? 2 : 1;
+      for (let bi = 0; bi < bucket.length; bi += 1) {
+        const idx = bucket[bi];
+        const rawLane = spec.lanes[bi % spec.lanes.length];
+        const lane = mirror ? (LANES - 1 - rawLane) : rawLane;
+        const nextLane = this.stepLaneToward(prevLane, lane, maxStep);
+        out[idx].lane = nextLane;
+        if (out[idx].type === "slide") {
+          out[idx].slideToLane = this.pickSlideTarget(nextLane, nextRandom);
+        } else {
+          out[idx].slideToLane = nextLane;
+        }
+        prevLane = nextLane;
+      }
+    }
+
+    out.sort((a, b) => a.beatTime - b.beatTime);
+    return out;
+  }
+
+  private survivabilityPass(
+    events: SpawnEvent[],
+    beatSeconds: number,
+    minGapSeconds: number,
+    difficulty: "chill" | "normal" | "hyper"
+  ): SpawnEvent[] {
+    if (events.length <= 2) {
+      return events;
+    }
+
+    const out: SpawnEvent[] = [];
+    const switchTime = difficulty === "hyper" ? 0.17 : difficulty === "chill" ? 0.24 : 0.2;
+    const minMineGap = Math.max(minGapSeconds * 1.2, beatSeconds * 0.75);
+    let lastTime = events[0].beatTime;
+    let currentLane = 1;
+    let lastMineTime = -Infinity;
+    let lastMineLane = -1;
+
+    for (let i = 0; i < events.length; i += 1) {
+      const e = { ...events[i] };
+      const dt = Math.max(0.01, e.beatTime - lastTime);
+      const maxStep = Math.max(1, Math.floor(dt / switchTime));
+      const reachable = this.stepLaneToward(currentLane, e.lane, maxStep);
+
+      if (e.type === "mine") {
+        if (e.beatTime - lastMineTime < minMineGap && e.lane === lastMineLane) {
+          continue;
+        }
+        // Keep mines readable and avoid forced impossible switches.
+        e.lane = reachable;
+        e.slideToLane = e.lane;
+        lastMineTime = e.beatTime;
+        lastMineLane = e.lane;
+      } else {
+        e.lane = reachable;
+        if (e.type === "slide") {
+          e.slideToLane = this.stepLaneToward(e.lane, e.slideToLane, 1);
+        } else {
+          e.slideToLane = e.lane;
+        }
+      }
+
+      out.push(e);
+      lastTime = e.beatTime;
+      currentLane = e.lane;
     }
 
     return out;
@@ -521,6 +658,18 @@ export class EventPlanner {
     const normalized = Math.max(0, Math.min(0.9999, beatTime / Math.max(1e-6, duration)));
     const frame = Math.max(0, Math.min(sectionByFrame.length - 1, Math.floor(normalized * sectionByFrame.length)));
     return sectionByFrame[frame];
+  }
+
+  private stepLaneToward(current: number, target: number, maxStep: number): number {
+    const clampedTarget = Math.max(0, Math.min(LANES - 1, target));
+    const step = Math.max(1, maxStep);
+    if (clampedTarget > current) {
+      return Math.min(clampedTarget, current + step);
+    }
+    if (clampedTarget < current) {
+      return Math.max(clampedTarget, current - step);
+    }
+    return clampedTarget;
   }
 
   private clampFrame(frame: number, length: number): number {
