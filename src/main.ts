@@ -13,6 +13,8 @@ interface Profile {
   };
 }
 
+type MenuTab = "start" | "settings" | "profile";
+
 const byId = <T extends HTMLElement>(id: string): T => {
   const node = document.getElementById(id);
   if (!node) {
@@ -22,17 +24,28 @@ const byId = <T extends HTMLElement>(id: string): T => {
 };
 
 const mount = byId<HTMLElement>("app");
+const mainMenu = byId<HTMLDivElement>("main-menu");
+const closeMenuBtn = byId<HTMLButtonElement>("close-menu");
+const openMenuBtn = byId<HTMLButtonElement>("open-menu-btn");
+const tabStartBtn = byId<HTMLButtonElement>("tab-start");
+const tabSettingsBtn = byId<HTMLButtonElement>("tab-settings");
+const tabProfileBtn = byId<HTMLButtonElement>("tab-profile");
+const panelStart = byId<HTMLElement>("panel-start");
+const panelSettings = byId<HTMLElement>("panel-settings");
+const panelProfile = byId<HTMLElement>("panel-profile");
+
 const fileInput = byId<HTMLInputElement>("audio-file");
 const playButton = byId<HTMLButtonElement>("play-button");
-const compactToggle = byId<HTMLButtonElement>("compact-toggle");
 const gameModeSelect = byId<HTMLSelectElement>("game-mode");
 const difficultySelect = byId<HTMLSelectElement>("difficulty");
 const strictModeInput = byId<HTMLInputElement>("strict-mode");
 const mirrorLanesInput = byId<HTMLInputElement>("mirror-lanes");
-const timingOffsetInput = byId<HTMLInputElement>("timing-offset");
-const timingOffsetLabel = byId<HTMLSpanElement>("timing-offset-label");
 const seedInput = byId<HTMLInputElement>("seed-input");
 const applySeedButton = byId<HTMLButtonElement>("apply-seed");
+const chartSummaryLabel = byId<HTMLDivElement>("chart-summary");
+
+const timingOffsetInput = byId<HTMLInputElement>("timing-offset");
+const timingOffsetLabel = byId<HTMLSpanElement>("timing-offset-label");
 const calibrateButton = byId<HTMLButtonElement>("calibrate-btn");
 const practiceSpeedInput = byId<HTMLInputElement>("practice-speed");
 const practiceSpeedLabel = byId<HTMLSpanElement>("practice-speed-label");
@@ -49,22 +62,14 @@ const cameraPulseInput = byId<HTMLInputElement>("camera-pulse");
 const metronomeEnabledInput = byId<HTMLInputElement>("metronome-enabled");
 const metronomeBpmInput = byId<HTMLInputElement>("metronome-bpm");
 const touchZonesToggle = byId<HTMLInputElement>("touch-zones-toggle");
-const touchZones = byId<HTMLDivElement>("touch-zones");
-const touchLane0 = byId<HTMLButtonElement>("touch-lane-0");
-const touchLane1 = byId<HTMLButtonElement>("touch-lane-1");
-const touchLane2 = byId<HTMLButtonElement>("touch-lane-2");
 
 const scoreLabel = byId<HTMLSpanElement>("score");
 const comboLabel = byId<HTMLSpanElement>("combo");
-const maxComboLabel = byId<HTMLSpanElement>("max-combo");
-const feverLabel = byId<HTMLSpanElement>("fever");
 const accuracyLabel = byId<HTMLSpanElement>("accuracy");
-const breakdownLabel = byId<HTMLSpanElement>("breakdown");
-const chartSummaryLabel = byId<HTMLSpanElement>("chart-summary");
-const profileSummaryLabel = byId<HTMLSpanElement>("profile-summary");
-const missionSummaryLabel = byId<HTMLSpanElement>("mission-summary");
-const sessionSummaryLabel = byId<HTMLSpanElement>("session-summary");
-const goalSummaryLabel = byId<HTMLSpanElement>("goal-summary");
+const profileSummaryLabel = byId<HTMLDivElement>("profile-summary");
+const missionSummaryLabel = byId<HTMLDivElement>("mission-summary");
+const sessionSummaryLabel = byId<HTMLDivElement>("session-summary");
+const goalSummaryLabel = byId<HTMLDivElement>("goal-summary");
 const debugLabel = byId<HTMLDivElement>("debug");
 const judgmentLabel = byId<HTMLDivElement>("judgment");
 
@@ -77,12 +82,17 @@ const resultMaxCombo = byId<HTMLSpanElement>("result-max-combo");
 const resultBreakdown = byId<HTMLSpanElement>("result-breakdown");
 const resultTypes = byId<HTMLSpanElement>("result-types");
 const resultTech = byId<HTMLSpanElement>("result-tech");
+const resultMenuBtn = byId<HTMLButtonElement>("result-menu-btn");
+
+const touchZones = byId<HTMLDivElement>("touch-zones");
+const touchLane0 = byId<HTMLButtonElement>("touch-lane-0");
+const touchLane1 = byId<HTMLButtonElement>("touch-lane-1");
+const touchLane2 = byId<HTMLButtonElement>("touch-lane-2");
 
 const game = new Game(mount);
 game.start();
 
 const PB_KEY = "vibesurfer_personal_best";
-const COMPACT_KEY = "vibesurfer_hud_compact";
 const QUALITY_KEY = "vibesurfer_quality";
 const FX_KEY = "vibesurfer_fx";
 const LANE_TOLERANCE_KEY = "vibesurfer_lane_tolerance";
@@ -141,10 +151,30 @@ const saveProfile = (): void => {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
 };
 
-const hudElement = byId<HTMLDivElement>("hud");
-if (localStorage.getItem(COMPACT_KEY) === "1") {
-  hudElement.classList.add("compact");
-}
+const setMenuOpen = (open: boolean): void => {
+  mainMenu.classList.toggle("hidden", !open);
+  if (!open) {
+    resultPanel.classList.remove("show");
+  }
+};
+
+const setTab = (tab: MenuTab): void => {
+  panelStart.classList.toggle("active", tab === "start");
+  panelSettings.classList.toggle("active", tab === "settings");
+  panelProfile.classList.toggle("active", tab === "profile");
+};
+
+const updateProfileUi = (): void => {
+  profileSummaryLabel.textContent = `Profile Plays:${profile.totalPlays} Clears:${profile.clears} BestAcc:${(profile.bestAccuracy * 100).toFixed(1)}% BestCombo:${profile.bestCombo}`;
+  missionSummaryLabel.textContent = `Missions 50:${profile.missions.combo50 ? "Y" : "N"} 100:${profile.missions.combo100 ? "Y" : "N"} Acc90:${profile.missions.accuracy90 ? "Y" : "N"}`;
+  sessionSummaryLabel.textContent = `Session Plays:${session.plays} Clears:${session.clears} BestCombo:${session.bestCombo}`;
+
+  const nextComboGoal = profile.missions.combo100 ? "All Major Combo Goals Complete" : profile.missions.combo50 ? "Next: 100 Combo" : "Next: 50 Combo";
+  const nextAccGoal = profile.missions.accuracy90 ? "Accuracy Goal Complete" : "Next: 90% Accuracy";
+  goalSummaryLabel.textContent = `Goals ${nextComboGoal} | ${nextAccGoal}`;
+};
+
+updateProfileUi();
 
 const savedQuality = (localStorage.getItem(QUALITY_KEY) as QualityMode | null) ?? "auto";
 qualityModeSelect.value = savedQuality;
@@ -176,14 +206,6 @@ game.setMirrorLanes(savedMirror);
 const savedStrict = localStorage.getItem(STRICT_KEY) === "1";
 strictModeInput.checked = savedStrict;
 game.setStrictMode(savedStrict);
-
-const updateProfileUi = (): void => {
-  profileSummaryLabel.textContent = `Profile Plays:${profile.totalPlays} Clears:${profile.clears} BestAcc:${(profile.bestAccuracy * 100).toFixed(1)}% BestCombo:${profile.bestCombo}`;
-  missionSummaryLabel.textContent = `Missions 50:${profile.missions.combo50 ? "Y" : "N"} 100:${profile.missions.combo100 ? "Y" : "N"} Acc90:${profile.missions.accuracy90 ? "Y" : "N"}`;
-  sessionSummaryLabel.textContent = `Session Plays:${session.plays} Clears:${session.clears} BestCombo:${session.bestCombo}`;
-};
-
-updateProfileUi();
 
 let calibrating = false;
 const calibrationDeltas: number[] = [];
@@ -225,10 +247,7 @@ const updateHud = (): void => {
   const state = game.getScoreState();
   scoreLabel.textContent = `Score: ${state.score}`;
   comboLabel.textContent = `Combo: ${state.combo}`;
-  maxComboLabel.textContent = `Max Combo: ${state.maxCombo}`;
-  feverLabel.textContent = `Fever: ${(state.fever * 100).toFixed(0)}%`;
-  accuracyLabel.textContent = `Accuracy: ${(state.accuracy * 100).toFixed(1)}%`;
-  breakdownLabel.textContent = `P:${state.perfect} G:${state.great} g:${state.good} M:${state.miss}`;
+  accuracyLabel.textContent = `Acc: ${(state.accuracy * 100).toFixed(1)}%`;
 
   judgmentLabel.textContent = state.judgment;
   judgmentLabel.classList.toggle("show", state.judgmentVisible);
@@ -271,15 +290,15 @@ const updateHud = (): void => {
     saveProfile();
     updateProfileUi();
   }
-  previousResultComplete = result.complete;
-  const nextComboGoal = profile.missions.combo100 ? "All Major Combo Goals Complete" : profile.missions.combo50 ? "Next: 100 Combo" : "Next: 50 Combo";
-  const nextAccGoal = profile.missions.accuracy90 ? "Accuracy Goal Complete" : "Next: 90% Accuracy";
-  goalSummaryLabel.textContent = `Goals ${nextComboGoal} | ${nextAccGoal}`;
 
+  previousResultComplete = result.complete;
   hudRaf = requestAnimationFrame(updateHud);
 };
 
 hudRaf = requestAnimationFrame(updateHud);
+
+setMenuOpen(true);
+setTab("start");
 
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
@@ -298,12 +317,26 @@ playButton.addEventListener("click", async () => {
   saveProfile();
   updateProfileUi();
   await game.playAudio();
+  setMenuOpen(false);
 });
 
-compactToggle.addEventListener("click", () => {
-  hudElement.classList.toggle("compact");
-  localStorage.setItem(COMPACT_KEY, hudElement.classList.contains("compact") ? "1" : "0");
+openMenuBtn.addEventListener("click", () => {
+  setMenuOpen(true);
+  setTab("start");
 });
+
+closeMenuBtn.addEventListener("click", () => {
+  setMenuOpen(false);
+});
+
+resultMenuBtn.addEventListener("click", () => {
+  setMenuOpen(true);
+  setTab("profile");
+});
+
+tabStartBtn.addEventListener("click", () => setTab("start"));
+tabSettingsBtn.addEventListener("click", () => setTab("settings"));
+tabProfileBtn.addEventListener("click", () => setTab("profile"));
 
 gameModeSelect.addEventListener("change", () => {
   game.setGameMode(gameModeSelect.value as GameMode);

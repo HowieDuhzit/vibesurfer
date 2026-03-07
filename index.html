@@ -22,56 +22,85 @@
         inset: 0;
       }
 
-      #hud {
+      #main-menu {
         position: fixed;
-        top: 12px;
-        left: 12px;
-        z-index: 10;
+        inset: 0;
+        z-index: 20;
         display: grid;
-        gap: 8px;
-        padding: 12px;
-        border: 1px solid #334155;
-        background: rgba(2, 6, 23, 0.78);
-        border-radius: 8px;
-        backdrop-filter: blur(6px);
-        width: min(620px, calc(100vw - 24px));
+        place-items: center;
+        background: radial-gradient(circle at 20% 10%, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.95));
       }
 
-      #hud.compact {
-        width: auto;
-        max-width: 360px;
-      }
-
-      #hud.compact #perf,
-      #hud.compact #debug,
-      #hud.compact #settings,
-      #hud.compact #chart-preview,
-      #hud.compact #progress {
+      #main-menu.hidden {
         display: none;
       }
 
-      #hud-row,
-      #stats,
-      #perf,
-      #settings,
-      #chart-preview,
-      #progress {
+      .menu-shell {
+        width: min(860px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        overflow: auto;
+        padding: 16px;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        background: rgba(2, 6, 23, 0.75);
+        backdrop-filter: blur(8px);
+        display: grid;
+        gap: 12px;
+      }
+
+      .menu-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .menu-tabs,
+      .row,
+      .stats-row {
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
         align-items: center;
       }
 
-      #chart-preview,
-      #progress {
-        font-size: 13px;
-        opacity: 0.95;
+      .panel {
+        display: none;
+        gap: 10px;
+      }
+
+      .panel.active {
+        display: grid;
+      }
+
+      .group {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        background: rgba(15, 23, 42, 0.45);
+      }
+
+      #ingame-hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 12px;
+        border: 1px solid #334155;
+        border-radius: 8px;
+        background: rgba(2, 6, 23, 0.7);
+        backdrop-filter: blur(6px);
       }
 
       #judgment {
         position: fixed;
         left: 50%;
-        top: 22%;
+        top: 18%;
         transform: translate(-50%, -50%);
         z-index: 15;
         font-size: clamp(28px, 5vw, 52px);
@@ -92,10 +121,10 @@
         position: fixed;
         right: 12px;
         top: 12px;
-        z-index: 11;
+        z-index: 16;
         padding: 12px;
         border: 1px solid #334155;
-        background: rgba(2, 6, 23, 0.82);
+        background: rgba(2, 6, 23, 0.85);
         border-radius: 8px;
         width: min(360px, calc(100vw - 24px));
         display: none;
@@ -111,7 +140,7 @@
         left: 0;
         right: 0;
         bottom: 0;
-        z-index: 12;
+        z-index: 14;
         display: none;
         grid-template-columns: 1fr 1fr 1fr;
         gap: 4px;
@@ -144,137 +173,134 @@
         cursor: pointer;
       }
 
-      button:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
       input[type="range"] {
         width: 120px;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        opacity: 0.9;
       }
     </style>
   </head>
   <body>
-    <div id="hud">
-      <label>
-        Load song:
-        <input id="audio-file" type="file" accept="audio/*" />
-      </label>
-      <div id="hud-row">
-        <button id="play-button" disabled>Play</button>
-        <button id="compact-toggle" type="button">Compact HUD</button>
-        <label>
-          Mode
-          <select id="game-mode">
-            <option value="chart" selected>Chart</option>
-            <option value="practice">Practice</option>
-            <option value="endless">Endless</option>
-          </select>
-        </label>
-        <label>
-          Difficulty
-          <select id="difficulty">
-            <option value="chill">Chill</option>
-            <option value="normal" selected>Normal</option>
-            <option value="hyper">Hyper</option>
-          </select>
-        </label>
-        <label>
-          Strict
-          <input id="strict-mode" type="checkbox" />
-        </label>
-        <label>
-          Mirror
-          <input id="mirror-lanes" type="checkbox" />
-        </label>
+    <div id="main-menu">
+      <div class="menu-shell">
+        <div class="menu-head">
+          <div>
+            <strong style="font-size: 22px">VibeSurfer</strong>
+            <div style="opacity: 0.85">Main Menu</div>
+          </div>
+          <div class="row">
+            <button id="play-button" disabled>Start Run</button>
+            <button id="close-menu">Close Menu</button>
+          </div>
+        </div>
+
+        <div class="menu-tabs">
+          <button id="tab-start">Start</button>
+          <button id="tab-settings">Settings</button>
+          <button id="tab-profile">Profile</button>
+        </div>
+
+        <section id="panel-start" class="panel active">
+          <div class="group">
+            <label>
+              Load song:
+              <input id="audio-file" type="file" accept="audio/*" />
+            </label>
+            <div class="row">
+              <label>Mode
+                <select id="game-mode">
+                  <option value="chart" selected>Chart</option>
+                  <option value="practice">Practice</option>
+                  <option value="endless">Endless</option>
+                </select>
+              </label>
+              <label>Difficulty
+                <select id="difficulty">
+                  <option value="chill">Chill</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="hyper">Hyper</option>
+                </select>
+              </label>
+              <label>Strict <input id="strict-mode" type="checkbox" /></label>
+              <label>Mirror <input id="mirror-lanes" type="checkbox" /></label>
+            </div>
+            <div class="row">
+              <label>Seed <input id="seed-input" type="number" value="123456789" style="width: 130px" /></label>
+              <button id="apply-seed">Apply Seed</button>
+            </div>
+            <div class="mono" id="chart-summary">Chart: -</div>
+          </div>
+        </section>
+
+        <section id="panel-settings" class="panel">
+          <div class="group">
+            <div class="row">
+              <label>Sync
+                <input id="timing-offset" type="range" min="-120" max="120" step="1" value="0" />
+                <span id="timing-offset-label">0ms</span>
+              </label>
+              <button id="calibrate-btn">Calibrate</button>
+            </div>
+            <div class="row">
+              <label>Practice Speed
+                <input id="practice-speed" type="range" min="55" max="115" step="1" value="85" />
+                <span id="practice-speed-label">85%</span>
+              </label>
+            </div>
+            <div class="row">
+              <label>Loop Start <input id="loop-start" type="number" min="0" step="0.1" value="0" style="width: 80px" /></label>
+              <label>Loop End <input id="loop-end" type="number" min="0" step="0.1" value="0" style="width: 80px" /></label>
+              <button id="apply-loop">Apply Loop</button>
+              <button id="clear-loop">Clear Loop</button>
+            </div>
+            <div class="row">
+              <label>Quality
+                <select id="quality-mode">
+                  <option value="auto" selected>Auto</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label>FX
+                <input id="fx-intensity" type="range" min="30" max="200" step="1" value="100" />
+                <span id="fx-intensity-label">100%</span>
+              </label>
+              <label>Lane Assist
+                <input id="lane-tolerance" type="range" min="30" max="120" step="1" value="55" />
+                <span id="lane-tolerance-label">55%</span>
+              </label>
+            </div>
+            <div class="row">
+              <label>Cam Pulse <input id="camera-pulse" type="checkbox" checked /></label>
+              <label>Metro <input id="metronome-enabled" type="checkbox" /></label>
+              <label>BPM <input id="metronome-bpm" type="number" min="60" max="220" step="1" value="120" style="width: 72px" /></label>
+              <label>Touch UI <input id="touch-zones-toggle" type="checkbox" /></label>
+            </div>
+          </div>
+        </section>
+
+        <section id="panel-profile" class="panel">
+          <div class="group">
+            <div id="profile-summary" class="mono">Profile: -</div>
+            <div id="mission-summary" class="mono">Missions: -</div>
+            <div id="session-summary" class="mono">Session: -</div>
+            <div id="goal-summary" class="mono">Goal: -</div>
+            <div id="debug" class="mono">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
+          </div>
+        </section>
       </div>
-      <div id="hud-row">
-        <label>
-          Sync
-          <input id="timing-offset" type="range" min="-120" max="120" step="1" value="0" />
-          <span id="timing-offset-label">0ms</span>
-        </label>
-        <label>
-          Seed
-          <input id="seed-input" type="number" value="123456789" style="width: 120px" />
-        </label>
-        <button id="apply-seed">Apply Seed</button>
-        <button id="calibrate-btn">Calibrate</button>
-      </div>
-      <div id="hud-row">
-        <label>
-          Practice Speed
-          <input id="practice-speed" type="range" min="55" max="115" step="1" value="85" />
-          <span id="practice-speed-label">85%</span>
-        </label>
-        <label>
-          Loop Start
-          <input id="loop-start" type="number" min="0" step="0.1" value="0" style="width: 72px" />
-        </label>
-        <label>
-          Loop End
-          <input id="loop-end" type="number" min="0" step="0.1" value="0" style="width: 72px" />
-        </label>
-        <button id="apply-loop">Apply Loop</button>
-        <button id="clear-loop">Clear Loop</button>
-      </div>
-      <div id="stats">
-        <span id="score">Score: 0</span>
-        <span id="combo">Combo: 0</span>
-        <span id="max-combo">Max Combo: 0</span>
-        <span id="fever">Fever: 0%</span>
-      </div>
-      <div id="perf">
-        <span id="accuracy">Accuracy: 0.0%</span>
-        <span id="breakdown">P:0 G:0 g:0 M:0</span>
-      </div>
-      <div id="settings">
-        <label>
-          Quality
-          <select id="quality-mode">
-            <option value="auto" selected>Auto</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-        </label>
-        <label>
-          FX
-          <input id="fx-intensity" type="range" min="30" max="200" step="1" value="100" />
-          <span id="fx-intensity-label">100%</span>
-        </label>
-        <label>
-          Lane Assist
-          <input id="lane-tolerance" type="range" min="30" max="120" step="1" value="55" />
-          <span id="lane-tolerance-label">55%</span>
-        </label>
-        <label>
-          Cam Pulse
-          <input id="camera-pulse" type="checkbox" checked />
-        </label>
-        <label>
-          Metro
-          <input id="metronome-enabled" type="checkbox" />
-        </label>
-        <label>
-          BPM
-          <input id="metronome-bpm" type="number" min="60" max="220" step="1" value="120" style="width: 72px" />
-        </label>
-        <label>
-          Touch UI
-          <input id="touch-zones-toggle" type="checkbox" />
-        </label>
-      </div>
-      <div id="chart-preview">
-        <span id="chart-summary">Chart: -</span>
-      </div>
-      <div id="progress">
-        <span id="profile-summary">Profile: -</span>
-        <span id="mission-summary">Missions: -</span>
-        <span id="session-summary">Session: -</span>
-        <span id="goal-summary">Goal: -</span>
-      </div>
-      <div id="debug">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
+    </div>
+
+    <div id="ingame-hud">
+      <button id="open-menu-btn">Menu</button>
+      <span id="score">Score: 0</span>
+      <span id="combo">Combo: 0</span>
+      <span id="accuracy">Acc: 0.0%</span>
     </div>
 
     <div id="judgment"></div>
@@ -289,6 +315,7 @@
       <span id="result-breakdown">P:0 G:0 g:0 M:0</span>
       <span id="result-types">Tap:0 Hold:0 Slide:0 Double:0 Mines:0</span>
       <span id="result-tech">Hold C/B:0/0 Slide C/B:0/0</span>
+      <button id="result-menu-btn">Back To Menu</button>
     </div>
 
     <div id="touch-zones">
