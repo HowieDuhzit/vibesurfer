@@ -186,7 +186,7 @@ export class Track {
   }
 
   public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
-    const u = Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
+    const u = this.trackZToU(trackZ);
     this.centerlineCurve.getPointAt(u, this.tempCenter);
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.copy(this.tempCenter)
@@ -196,7 +196,7 @@ export class Track {
   }
 
   public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
-    const u = Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
+    const u = this.trackZToU(trackZ);
     this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
     out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
     this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
@@ -251,10 +251,6 @@ export class Track {
   private refreshCenterlineSpline(): void {
     for (let i = 0; i < this.centerlinePoints.length; i += 1) {
       const u = i / (this.centerlinePoints.length - 1);
-      if (i === 0) {
-        this.centerlinePoints[i].set(0, 0, 0);
-        continue;
-      }
 
       const damp = 0.6 + 0.4 * this.smoothstep(0.04, 1, u);
       const phase = (u * (1.22 + this.pace * 1.5) + this.waveTime * (0.14 + this.pace * 0.12)) * Math.PI * 2;
@@ -309,12 +305,17 @@ export class Track {
   }
 
   private updateRiderPose(): void {
-    this.centerlineCurve.getPointAt(0, this.tempCenter);
-    this.sampleFrameAt(0, this.tempTangent, this.tempRight, this.tempUp);
+    const riderU = this.trackZToU(0);
+    this.centerlineCurve.getPointAt(riderU, this.tempCenter);
+    this.sampleFrameAt(riderU, this.tempTangent, this.tempRight, this.tempUp);
     const forwardLen = Math.max(1e-6, Math.hypot(this.tempTangent.x, this.tempTangent.z));
     this.riderPitch = Math.atan2(this.tempTangent.y, forwardLen);
     this.riderBank = this.bank * 0.9 + Math.sin(this.waveTime * 1.8) * this.curve * 0.02;
     this.riderHeight = this.tempCenter.y;
+  }
+
+  private trackZToU(trackZ: number): number {
+    return Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
   }
 
   private sampleFrameAt(
