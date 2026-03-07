@@ -52,6 +52,7 @@ export class Track {
   private targetCurve = 0;
   private targetPace = 0;
   private targetForwardLean = 0;
+  private readonly motionIntensity = 0.46;
 
   private lift = 0;
   private bank = 0;
@@ -151,11 +152,11 @@ export class Track {
     const p = Math.max(0, Math.min(1, pace));
     const f = Math.max(0, Math.min(1, feature));
 
-    this.targetLift = e * 3.6 + f * 1.3;
-    this.targetCurve = c * (2.8 + p * 2.8 + f * 1.4);
-    this.targetBank = c * (0.14 + p * 0.22 + f * 0.1);
+    this.targetLift = (e * 3.6 + f * 1.3) * this.motionIntensity;
+    this.targetCurve = (c * (2.8 + p * 2.8 + f * 1.4)) * this.motionIntensity;
+    this.targetBank = (c * (0.14 + p * 0.22 + f * 0.1)) * this.motionIntensity;
     this.targetPace = p;
-    this.targetForwardLean = -0.02 - p * 0.05;
+    this.targetForwardLean = (-0.02 - p * 0.05) * this.motionIntensity;
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
@@ -256,14 +257,14 @@ export class Track {
       const phase = (u * (1.22 + this.pace * 1.5) + this.waveTime * (0.14 + this.pace * 0.12)) * Math.PI * 2;
       const phase2 = phase * 0.7 + 0.9;
 
-      const lateralA = Math.sin(phase) * this.curve * (0.12 + damp * 0.92);
-      const lateralB = Math.sin(phase * 0.48 + 1.4) * this.curve * 0.34 * damp;
+      const lateralA = Math.sin(phase) * this.curve * (0.1 + damp * 0.72);
+      const lateralB = Math.sin(phase * 0.48 + 1.4) * this.curve * 0.24 * damp;
       const lateral = lateralA + lateralB;
 
       const baseLift = this.lift * (0.08 + damp * 0.92);
-      const hillA = Math.sin(phase2) * this.lift * 0.56 * damp;
-      const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.33 * damp;
-      const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.2 * damp;
+      const hillA = Math.sin(phase2) * this.lift * 0.38 * damp;
+      const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.22 * damp;
+      const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.13 * damp;
       const slope = this.forwardLean * u * this.trackLength * 0.1;
       const y = baseLift + hillA + hillB + drop + slope;
 
@@ -284,7 +285,7 @@ export class Track {
 
         const phase = (u * (1.1 + this.pace * 0.95) + this.waveTime * (0.09 + this.pace * 0.1)) * Math.PI * 2;
         const damp = 0.52 + 0.48 * this.smoothstep(0.08, 1, u);
-        const roll = this.bank * (0.2 + damp * 0.84) + Math.sin(phase * 0.74) * this.curve * 0.04 * damp;
+        const roll = this.bank * (0.16 + damp * 0.64) + Math.sin(phase * 0.74) * this.curve * 0.025 * damp;
         this.tempQuat.setFromAxisAngle(this.tempTangent, roll);
         this.tempRight.applyQuaternion(this.tempQuat);
         this.tempUp.applyQuaternion(this.tempQuat);
