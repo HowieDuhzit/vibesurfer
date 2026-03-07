@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { AudioAnalyzer } from "../audio/AudioAnalyzer";
 import { AudioManager } from "../audio/AudioManager";
 import { BeatDetector } from "../audio/BeatDetector";
@@ -34,6 +35,7 @@ export class Game {
   private readonly lighting: Lighting;
   private readonly track: Track;
   private readonly player: Player;
+  private readonly playerVisualRoot: THREE.Group;
 
   private readonly audioManager: AudioManager;
   private readonly audioAnalyzer: AudioAnalyzer;
@@ -88,6 +90,7 @@ export class Game {
 
   private frameCostAvg = 1 / 60;
   private qualityAdaptClock = 0;
+  private hoverBobTime = 0;
 
   public constructor(private readonly mount: HTMLElement) {
     this.renderer = new Renderer(this.mount);
@@ -98,8 +101,10 @@ export class Game {
     this.sceneManager.add(this.track.group);
 
     const playerRig = this.createPlayerRig();
+    this.playerVisualRoot = playerRig.visualRoot;
     this.player = new Player(playerRig);
     this.sceneManager.add(this.player.mesh);
+    void this.loadBikeModel();
 
     this.audioManager = new AudioManager();
     this.audioAnalyzer = new AudioAnalyzer(this.audioManager.getAnalyser());
@@ -600,6 +605,7 @@ export class Game {
       this.frequencySideRailsEffect.update(time.deltaTime, energyNorm, bassNorm, trebleNorm, this.audioAnalyzer.getFrequencyData());
       this.musicVisualizerBackground.update(time.deltaTime, energyNorm, bassNorm, trebleNorm, this.audioAnalyzer.getFrequencyData());
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, energyNorm, bassNorm, fever);
+      this.updatePlayerHoverVisual(time.deltaTime, energyNorm, bassNorm);
 
       const audioTime = this.audioManager.getCurrentTime();
       this.beatDetector.update(audioTime);
@@ -637,6 +643,7 @@ export class Game {
       this.frequencySideRailsEffect.update(time.deltaTime, 0.08, 0.06, 0.12);
       this.musicVisualizerBackground.update(time.deltaTime, 0, 0, 0);
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, 0.08, 0.06, 0);
+      this.updatePlayerHoverVisual(time.deltaTime, 0.08, 0.06);
       this.track.setControlProfile(0, 0, 0, 0);
       this.cameraController.setTrackMotion(0, 0, 0);
       this.movementSystem.update(time.deltaTime);
@@ -674,8 +681,10 @@ export class Game {
     return 1;
   }
 
-  private createPlayerRig(): THREE.Object3D {
-    const root = new THREE.Group();
+  private createPlayerRig(): THREE.Group & { visualRoot: THREE.Group } {
+    const root = new THREE.Group() as THREE.Group & { visualRoot: THREE.Group };
+    const visualRoot = new THREE.Group();
+    root.add(visualRoot);
 
     const body = new THREE.Mesh(
       new THREE.CapsuleGeometry(0.45, 1.05, 6, 14),
@@ -691,7 +700,7 @@ export class Game {
     );
     body.position.y = 0.25;
     body.castShadow = true;
-    root.add(body);
+    visualRoot.add(body);
 
     const canopy = new THREE.Mesh(
       new THREE.SphereGeometry(0.36, 20, 16),
@@ -710,7 +719,7 @@ export class Game {
       })
     );
     canopy.position.set(0, 0.72, 0.08);
-    root.add(canopy);
+    visualRoot.add(canopy);
 
     const trim = new THREE.Mesh(
       new THREE.TorusGeometry(0.58, 0.05, 12, 44),
@@ -725,8 +734,55 @@ export class Game {
     trim.rotation.x = Math.PI * 0.5;
     trim.position.y = 0.12;
     trim.castShadow = true;
-    root.add(trim);
-
+    visualRoot.add(trim);
+    root.userData.visualRoot = visualRoot;
+    root.visualRoot = visualRoot;
     return root;
+  }
+
+  private async loadBikeModel(): Promise<void> {
+    try {
+      const loader = new GLTFLoader();
+      const url = new URL("../../assets/models/bike.glb", import.meta.url).href;
+      const gltf = await loader.loadAsync(url);
+      const bike = gltf.scene;
+      bike.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+        }
+      });
+
+      const box = new THREE.Box3().setFromObject(bike);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+      const target = 1.7;
+      const scale = target / maxDim;
+      bike.scale.setScalar(scale);
+      bike.position.sub(center.multiplyScalar(scale));
+
+      // Face down-track and sit centered over lane root.
+      bike.rotation.y = Math.PI;
+      bike.position.y += 0.25;
+
+      this.playerVisualRoot.clear();
+      this.playerVisualRoot.add(bike);
+    } catch {
+      // Keep fallback capsule rig if model load fails.
+    }
+  }
+
+  private updatePlayerHoverVisual(deltaTime: number, energy: number, bass: number): void {
+    this.hoverBobTime += deltaTime * (1.8 + energy * 2.2 + bass * 1.4);
+    const bob = Math.sin(this.hoverBobTime) * (0.05 + energy * 0.03);
+    const sway = Math.sin(this.hoverBobTime * 0.5 + 0.7) * 0.025;
+    const roll = Math.sin(this.hoverBobTime * 0.9) * 0.03;
+    this.playerVisualRoot.position.y = bob;
+    this.playerVisualRoot.position.x = sway;
+    this.playerVisualRoot.rotation.z = roll;
   }
 }
