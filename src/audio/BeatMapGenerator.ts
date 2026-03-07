@@ -6,7 +6,7 @@ import { RhythmAnalyzer } from "./RhythmAnalyzer";
 import { SongAnalyzer } from "./SongAnalyzer";
 import { StructureAnalyzer } from "./StructureAnalyzer";
 import { TrackPlanner } from "./TrackPlanner";
-import { SongSection, TrackPlan } from "./AnalysisTypes";
+import { RhythmAnalysis, SongAnalysis, SongSection, StructureAnalysis, TrackPlan } from "./AnalysisTypes";
 
 export interface SpawnEvent {
   spawnTime: number;
@@ -57,6 +57,12 @@ export class BeatMapGenerator {
   private readonly structureAnalyzer = new StructureAnalyzer();
   private readonly trackPlanner = new TrackPlanner();
   private readonly eventPlanner = new EventPlanner();
+  private readonly analysisCache = new WeakMap<AudioBuffer, {
+    song: SongAnalysis;
+    rhythm: RhythmAnalysis;
+    structure: StructureAnalysis;
+    track: TrackPlan;
+  }>();
 
   private mapSeed = 123456789;
   private timingOffsetSeconds = 0.01;
@@ -97,10 +103,7 @@ export class BeatMapGenerator {
       return;
     }
 
-    const song = this.songAnalyzer.analyze(buffer);
-    const rhythm = this.rhythmAnalyzer.analyze(song);
-    const structure = this.structureAnalyzer.analyze(song, rhythm);
-    const track = this.trackPlanner.plan(song, rhythm, structure);
+    const { song, rhythm, structure, track } = this.getOrAnalyze(buffer);
 
     this.debugData = {
       bpm: rhythm.bpm,
@@ -245,6 +248,27 @@ export class BeatMapGenerator {
       feature: downsample(track.featureEligibility),
       novelty: downsample(novelty)
     };
+  }
+
+  private getOrAnalyze(buffer: AudioBuffer): {
+    song: SongAnalysis;
+    rhythm: RhythmAnalysis;
+    structure: StructureAnalysis;
+    track: TrackPlan;
+  } {
+    const cached = this.analysisCache.get(buffer);
+    if (cached) {
+      return cached;
+    }
+
+    const song = this.songAnalyzer.analyze(buffer);
+    const rhythm = this.rhythmAnalyzer.analyze(song);
+    const structure = this.structureAnalyzer.analyze(song, rhythm);
+    const track = this.trackPlanner.plan(song, rhythm, structure);
+
+    const next = { song, rhythm, structure, track };
+    this.analysisCache.set(buffer, next);
+    return next;
   }
 
   private updateDiagnostics(events: readonly SpawnEvent[], duration: number): void {
