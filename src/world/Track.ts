@@ -163,12 +163,17 @@ export class Track {
         segment.zPosition -= this.totalLength;
       }
 
-      const depthNorm = Math.max(0, Math.min(1, 1 - (-segment.zPosition / this.totalLength)));
-      const phase = i * 0.52 + this.waveTime * (0.7 + this.pace * 0.6);
-      const lateral = Math.sin(phase) * this.curve * (0.85 + depthNorm * 0.95);
-      const lift = this.lift * (0.32 + depthNorm * 0.72) + Math.sin(phase * 0.62) * this.lift * 0.2;
-      const bank = this.bank * (0.5 + depthNorm * 0.75) + Math.sin(phase * 0.86) * this.curve * 0.08;
-      const pitch = -Math.PI * 0.5 + this.forwardLean + Math.cos(phase * 0.44) * this.lift * 0.07;
+      // Keep lane readability near the hit zone by reducing deformation near z ~ 0
+      // and amplifying it farther ahead on the track.
+      const farNorm = Math.max(0, Math.min(1, -segment.zPosition / this.totalLength));
+      const laneReadabilityDamp = Math.max(0.08, farNorm * farNorm);
+      const flowU = (farNorm + this.waveTime * (0.1 + this.pace * 0.08)) * Math.PI * 2;
+      const flowV = flowU * 1.8 + i * 0.05;
+
+      const lateral = Math.sin(flowU) * this.curve * (0.14 + laneReadabilityDamp * 1.18);
+      const lift = this.lift * (0.08 + laneReadabilityDamp * 0.84) + Math.sin(flowV) * this.lift * 0.12 * laneReadabilityDamp;
+      const bank = this.bank * (0.2 + laneReadabilityDamp * 0.9) + Math.sin(flowV * 0.72) * this.curve * 0.04 * laneReadabilityDamp;
+      const pitch = -Math.PI * 0.5 + this.forwardLean + Math.cos(flowU * 0.6) * this.lift * 0.04 * laneReadabilityDamp;
 
       segment.mesh.position.set(lateral, lift, segment.zPosition);
       segment.mesh.rotation.set(pitch, 0, bank);
