@@ -38,6 +38,7 @@ export interface GeneratorDebugData {
     lane0: number;
     lane1: number;
     lane2: number;
+    chartHash: string;
   };
   plan: {
     elevation: readonly number[];
@@ -105,7 +106,8 @@ export class BeatMapGenerator {
       nps: 0,
       lane0: 0,
       lane1: 0,
-      lane2: 0
+      lane2: 0,
+      chartHash: "00000000"
     },
     plan: {
       elevation: [],
@@ -148,7 +150,8 @@ export class BeatMapGenerator {
         nps: 0,
         lane0: 0,
         lane1: 0,
-        lane2: 0
+        lane2: 0,
+        chartHash: "00000000"
       },
       plan: this.compactPlan(track, structure.noveltyEnvelope)
     };
@@ -361,8 +364,45 @@ export class BeatMapGenerator {
       nps: events.length / Math.max(1, duration),
       lane0,
       lane1,
-      lane2
+      lane2,
+      chartHash: this.computeChartHash(events)
     };
+  }
+
+  private computeChartHash(events: readonly SpawnEvent[]): string {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < events.length; i += 1) {
+      const e = events[i];
+      hash = this.fnvMix(hash, Math.floor(e.beatTime * 1000));
+      hash = this.fnvMix(hash, Math.floor(e.spawnTime * 1000));
+      hash = this.fnvMix(hash, e.lane);
+      hash = this.fnvMix(hash, e.bassEnergy);
+      hash = this.fnvMix(hash, Math.floor(e.duration * 1000));
+      hash = this.fnvMix(hash, e.slideToLane);
+      hash = this.fnvMix(hash, this.noteTypeCode(e.type));
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+
+  private fnvMix(hash: number, value: number): number {
+    hash ^= value >>> 0;
+    return Math.imul(hash, 0x01000193);
+  }
+
+  private noteTypeCode(type: NoteType): number {
+    if (type === "hold") {
+      return 1;
+    }
+    if (type === "double") {
+      return 2;
+    }
+    if (type === "slide") {
+      return 3;
+    }
+    if (type === "mine") {
+      return 4;
+    }
+    return 0;
   }
 
   private generateFallbackGrid(durationSeconds: number): void {

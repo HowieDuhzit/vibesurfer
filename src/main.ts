@@ -464,7 +464,7 @@ function drawAnalysisDebug(): void {
   ctx.fillRect(0, 0, w, h);
 
   const debug = game.getGeneratorDebugData();
-  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Notes:${debug.diagnostics.notes} NPS:${debug.diagnostics.nps.toFixed(2)} Lanes:${debug.diagnostics.lane0}/${debug.diagnostics.lane1}/${debug.diagnostics.lane2} Sections:${debug.sections.length} Beats:${debug.beats.length} Onsets:${debug.onsets.length}`;
+  analysisMetaLabel.textContent = `Analysis BPM:${debug.bpm.toFixed(1)} Confidence:${(debug.beatConfidence * 100).toFixed(0)}% Notes:${debug.diagnostics.notes} NPS:${debug.diagnostics.nps.toFixed(2)} Lanes:${debug.diagnostics.lane0}/${debug.diagnostics.lane1}/${debug.diagnostics.lane2} Sections:${debug.sections.length} Beats:${debug.beats.length} Onsets:${debug.onsets.length} Hash:${debug.diagnostics.chartHash}`;
 
   const drawCurve = (values: readonly number[], color: string, yScale = 1): void => {
     if (values.length < 2) {
