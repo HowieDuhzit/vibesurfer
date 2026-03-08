@@ -1,7 +1,12 @@
 import { NoteType } from "../entities/Note";
 import { HitJudgment } from "./CollisionSystem";
 
+type RideStyle = "flow" | "burst" | "technical";
+type RulesetMode = "cruise" | "precision" | "assault";
+
 export class ScoreSystem {
+  private rideStyle: RideStyle = "flow";
+  private ruleset: RulesetMode = "cruise";
   public score = 0;
   public combo = 0;
   public maxCombo = 0;
@@ -47,11 +52,20 @@ export class ScoreSystem {
       this.tapHits += 1;
     }
 
-    const comboMultiplier = 1 + this.combo * 0.1;
+    const comboMultiplier = this.rideStyle === "flow"
+      ? 1 + this.combo * 0.115
+      : this.rideStyle === "burst"
+        ? 1 + this.combo * 0.09
+        : 1 + this.combo * 0.1;
     const base = judgment === "perfect" ? 130 : judgment === "great" ? 100 : 70;
-    const noteTypeMult = noteType === "hold" ? 1.35 : noteType === "double" ? 1.55 : noteType === "slide" ? 1.25 : 1;
-    const expressiveBonus = expressiveHit ? 35 : 0;
-    this.score += base * comboMultiplier * noteTypeMult + expressiveBonus;
+    const noteTypeMult = this.getNoteTypeMultiplier(noteType);
+    const expressiveBonus = expressiveHit ? (this.rideStyle === "technical" ? 55 : 35) : 0;
+    const rulesetBonus = this.ruleset === "precision"
+      ? judgment === "perfect" ? 30 : 10
+      : this.ruleset === "assault"
+        ? noteType === "double" || noteType === "slide" ? 26 : 8
+        : noteType === "hold" ? 18 : 0;
+    this.score += base * comboMultiplier * noteTypeMult + expressiveBonus + rulesetBonus;
   }
 
   public onNoteMissed(): void {
@@ -64,13 +78,16 @@ export class ScoreSystem {
   public onMineHit(): void {
     this.combo = 0;
     this.mineHits += 1;
-    this.score = Math.max(0, this.score - 220);
+    const penaltyBase = this.rideStyle === "technical" ? 280 : this.rideStyle === "burst" ? 180 : 220;
+    const penalty = this.ruleset === "assault" ? Math.round(penaltyBase * 0.85) : this.ruleset === "precision" ? Math.round(penaltyBase * 1.15) : penaltyBase;
+    this.score = Math.max(0, this.score - penalty);
     this.lastJudgment = "miss";
   }
 
   public onHoldCompleted(): void {
     this.holdCompleted += 1;
-    this.score += 90 + this.combo * 2.2;
+    const bonus = this.rideStyle === "flow" ? 130 : this.rideStyle === "technical" ? 95 : 80;
+    this.score += bonus + this.combo * 2.2;
   }
 
   public onHoldBroken(): void {
@@ -83,7 +100,16 @@ export class ScoreSystem {
 
   public onSlideCompleted(): void {
     this.slideCompleted += 1;
-    this.score += 110 + this.combo * 2.6;
+    const bonus = this.rideStyle === "technical" ? 145 : this.rideStyle === "burst" ? 120 : 105;
+    this.score += bonus + this.combo * 2.6;
+  }
+
+  public setRideStyle(rideStyle: RideStyle): void {
+    this.rideStyle = rideStyle;
+  }
+
+  public setRuleset(ruleset: RulesetMode): void {
+    this.ruleset = ruleset;
   }
 
   public onSlideBroken(): void {
@@ -127,5 +153,70 @@ export class ScoreSystem {
 
   public update(): void {
     // Reserved for future score-side effects.
+  }
+
+  private getNoteTypeMultiplier(noteType: NoteType): number {
+    if (this.ruleset === "precision") {
+      if (noteType === "slide") {
+        return 1.55;
+      }
+      if (noteType === "hold") {
+        return 1.14;
+      }
+      if (noteType === "double") {
+        return 1.34;
+      }
+      return 1.08;
+    }
+
+    if (this.ruleset === "assault") {
+      if (noteType === "double") {
+        return 1.82;
+      }
+      if (noteType === "mine") {
+        return 0.9;
+      }
+      if (noteType === "slide") {
+        return 1.3;
+      }
+      return 1.12;
+    }
+
+    if (this.rideStyle === "flow") {
+      if (noteType === "hold") {
+        return 1.55;
+      }
+      if (noteType === "slide") {
+        return 1.32;
+      }
+      if (noteType === "double") {
+        return 1.3;
+      }
+      return 1;
+    }
+
+    if (this.rideStyle === "burst") {
+      if (noteType === "double") {
+        return 1.72;
+      }
+      if (noteType === "tap") {
+        return 1.08;
+      }
+      if (noteType === "slide") {
+        return 1.22;
+      }
+      return 1.12;
+    }
+
+    if (noteType === "slide") {
+      return 1.42;
+    }
+    if (noteType === "hold") {
+      return 1.22;
+    }
+    if (noteType === "double") {
+      return 1.46;
+    }
+    return 1.05;
   }
 }

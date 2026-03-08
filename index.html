@@ -218,6 +218,20 @@
                   <option value="endless">Endless</option>
                 </select>
               </label>
+              <label>Ride Style
+                <select id="ride-style">
+                  <option value="flow" selected>Flow</option>
+                  <option value="burst">Burst</option>
+                  <option value="technical">Technical</option>
+                </select>
+              </label>
+              <label>Ruleset
+                <select id="ruleset-mode">
+                  <option value="cruise" selected>Cruise</option>
+                  <option value="precision">Precision</option>
+                  <option value="assault">Assault</option>
+                </select>
+              </label>
               <label>Difficulty
                 <select id="difficulty">
                   <option value="chill">Chill</option>
@@ -309,6 +323,7 @@
 
     <div id="result">
       <strong>Song Complete</strong>
+      <span id="result-run-mode">Mode: -</span>
       <span id="result-score">Score: 0</span>
       <span id="result-medal">Medal: -</span>
       <span id="result-personal-best">Personal Best: 0</span>

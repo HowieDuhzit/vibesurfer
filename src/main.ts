@@ -1,4 +1,4 @@
-import { DifficultyMode, Game, GameMode, QualityMode } from "./core/Game";
+import { DifficultyMode, Game, GameMode, QualityMode, RideStyle, RulesetMode } from "./core/Game";
 
 interface Profile {
   totalPlays: number;
@@ -6,10 +6,15 @@ interface Profile {
   bestAccuracy: number;
   bestCombo: number;
   totalScore: number;
+  longestClearStreak: number;
+  bestByRuleset: Record<RulesetMode, number>;
   missions: {
     combo50: boolean;
     combo100: boolean;
     accuracy90: boolean;
+    clearCruise: boolean;
+    clearPrecision: boolean;
+    clearAssault: boolean;
   };
 }
 
@@ -37,6 +42,8 @@ const panelProfile = byId<HTMLElement>("panel-profile");
 const fileInput = byId<HTMLInputElement>("audio-file");
 const playButton = byId<HTMLButtonElement>("play-button");
 const gameModeSelect = byId<HTMLSelectElement>("game-mode");
+const rideStyleSelect = byId<HTMLSelectElement>("ride-style");
+const rulesetSelect = byId<HTMLSelectElement>("ruleset-mode");
 const difficultySelect = byId<HTMLSelectElement>("difficulty");
 const strictModeInput = byId<HTMLInputElement>("strict-mode");
 const mirrorLanesInput = byId<HTMLInputElement>("mirror-lanes");
@@ -77,6 +84,7 @@ const judgmentLabel = byId<HTMLDivElement>("judgment");
 
 const resultPanel = byId<HTMLDivElement>("result");
 const resultScore = byId<HTMLSpanElement>("result-score");
+const resultRunMode = byId<HTMLSpanElement>("result-run-mode");
 const resultMedal = byId<HTMLSpanElement>("result-medal");
 const resultPersonalBest = byId<HTMLSpanElement>("result-personal-best");
 const resultAccuracy = byId<HTMLSpanElement>("result-accuracy");
@@ -103,9 +111,12 @@ const CAMERA_PULSE_KEY = "vibesurfer_camera_pulse";
 const TOUCH_ZONES_KEY = "vibesurfer_touch_zones";
 const MIRROR_KEY = "vibesurfer_mirror";
 const STRICT_KEY = "vibesurfer_strict";
+const RIDE_STYLE_KEY = "vibesurfer_ride_style";
+const RULESET_KEY = "vibesurfer_ruleset";
 
 let personalBest = Number(localStorage.getItem(PB_KEY) || "0");
 let previousResultComplete = false;
+let clearStreak = 0;
 
 const loadProfile = (): Profile => {
   try {
@@ -117,15 +128,24 @@ const loadProfile = (): Profile => {
     return {
       totalPlays: parsed.totalPlays ?? 0,
       clears: parsed.clears ?? 0,
-      bestAccuracy: parsed.bestAccuracy ?? 0,
-      bestCombo: parsed.bestCombo ?? 0,
-      totalScore: parsed.totalScore ?? 0,
-      missions: {
-        combo50: parsed.missions?.combo50 ?? false,
-        combo100: parsed.missions?.combo100 ?? false,
-        accuracy90: parsed.missions?.accuracy90 ?? false
-      }
-    };
+        bestAccuracy: parsed.bestAccuracy ?? 0,
+        bestCombo: parsed.bestCombo ?? 0,
+        totalScore: parsed.totalScore ?? 0,
+        longestClearStreak: parsed.longestClearStreak ?? 0,
+        bestByRuleset: {
+          cruise: parsed.bestByRuleset?.cruise ?? 0,
+          precision: parsed.bestByRuleset?.precision ?? 0,
+          assault: parsed.bestByRuleset?.assault ?? 0
+        },
+        missions: {
+          combo50: parsed.missions?.combo50 ?? false,
+          combo100: parsed.missions?.combo100 ?? false,
+          accuracy90: parsed.missions?.accuracy90 ?? false,
+          clearCruise: parsed.missions?.clearCruise ?? false,
+          clearPrecision: parsed.missions?.clearPrecision ?? false,
+          clearAssault: parsed.missions?.clearAssault ?? false
+        }
+      };
   } catch {
     return {
       totalPlays: 0,
@@ -133,10 +153,19 @@ const loadProfile = (): Profile => {
       bestAccuracy: 0,
       bestCombo: 0,
       totalScore: 0,
+      longestClearStreak: 0,
+      bestByRuleset: {
+        cruise: 0,
+        precision: 0,
+        assault: 0
+      },
       missions: {
         combo50: false,
         combo100: false,
-        accuracy90: false
+        accuracy90: false,
+        clearCruise: false,
+        clearPrecision: false,
+        clearAssault: false
       }
     };
   }
@@ -146,7 +175,8 @@ const profile = loadProfile();
 const session = {
   plays: 0,
   clears: 0,
-  bestCombo: 0
+  bestCombo: 0,
+  streak: 0
 };
 
 const saveProfile = (): void => {
@@ -167,13 +197,16 @@ const setTab = (tab: MenuTab): void => {
 };
 
 const updateProfileUi = (): void => {
-  profileSummaryLabel.textContent = `Profile Plays:${profile.totalPlays} Clears:${profile.clears} BestAcc:${(profile.bestAccuracy * 100).toFixed(1)}% BestCombo:${profile.bestCombo}`;
-  missionSummaryLabel.textContent = `Missions 50:${profile.missions.combo50 ? "Y" : "N"} 100:${profile.missions.combo100 ? "Y" : "N"} Acc90:${profile.missions.accuracy90 ? "Y" : "N"}`;
-  sessionSummaryLabel.textContent = `Session Plays:${session.plays} Clears:${session.clears} BestCombo:${session.bestCombo}`;
+  profileSummaryLabel.textContent = `Profile Plays:${profile.totalPlays} Clears:${profile.clears} BestAcc:${(profile.bestAccuracy * 100).toFixed(1)}% BestCombo:${profile.bestCombo} Streak:${profile.longestClearStreak} PB[C/P/A]:${profile.bestByRuleset.cruise}/${profile.bestByRuleset.precision}/${profile.bestByRuleset.assault}`;
+  missionSummaryLabel.textContent = `Missions 50:${profile.missions.combo50 ? "Y" : "N"} 100:${profile.missions.combo100 ? "Y" : "N"} Acc90:${profile.missions.accuracy90 ? "Y" : "N"} Cruise:${profile.missions.clearCruise ? "Y" : "N"} Precision:${profile.missions.clearPrecision ? "Y" : "N"} Assault:${profile.missions.clearAssault ? "Y" : "N"}`;
+  sessionSummaryLabel.textContent = `Session Plays:${session.plays} Clears:${session.clears} BestCombo:${session.bestCombo} Streak:${session.streak}`;
 
-  const nextComboGoal = profile.missions.combo100 ? "All Major Combo Goals Complete" : profile.missions.combo50 ? "Next: 100 Combo" : "Next: 50 Combo";
-  const nextAccGoal = profile.missions.accuracy90 ? "Accuracy Goal Complete" : "Next: 90% Accuracy";
-  goalSummaryLabel.textContent = `Goals ${nextComboGoal} | ${nextAccGoal}`;
+  const nextComboGoal = profile.missions.combo100 ? "Combo goals complete" : profile.missions.combo50 ? "Next: 100 Combo" : "Next: 50 Combo";
+  const nextAccGoal = profile.missions.accuracy90 ? "Accuracy goal complete" : "Next: 90% Accuracy";
+  const rulesetGoal = profile.missions.clearCruise && profile.missions.clearPrecision && profile.missions.clearAssault
+    ? "Rulesets complete"
+    : `Rulesets ${profile.missions.clearCruise ? "C" : "-"}${profile.missions.clearPrecision ? "P" : "-"}${profile.missions.clearAssault ? "A" : "-"}`;
+  goalSummaryLabel.textContent = `Goals ${nextComboGoal} | ${nextAccGoal} | ${rulesetGoal}`;
 };
 
 updateProfileUi();
@@ -208,6 +241,13 @@ game.setMirrorLanes(savedMirror);
 const savedStrict = localStorage.getItem(STRICT_KEY) === "1";
 strictModeInput.checked = savedStrict;
 game.setStrictMode(savedStrict);
+
+const savedRideStyle = (localStorage.getItem(RIDE_STYLE_KEY) as RideStyle | null) ?? "flow";
+rideStyleSelect.value = savedRideStyle;
+game.setRideStyle(savedRideStyle);
+const savedRuleset = (localStorage.getItem(RULESET_KEY) as RulesetMode | null) ?? "cruise";
+rulesetSelect.value = savedRuleset;
+game.setRuleset(savedRuleset);
 
 let calibrating = false;
 const calibrationDeltas: number[] = [];
@@ -255,7 +295,7 @@ const updateHud = (): void => {
   judgmentLabel.classList.toggle("show", state.judgmentVisible);
 
   const chart = game.getChartPreviewSummary();
-  chartSummaryLabel.textContent = `Chart N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}`;
+  chartSummaryLabel.textContent = `Chart ${game.getRuleset()}/${game.getRideStyle()} N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}`;
   drawAnalysisDebug();
 
   const debug = game.getDebugState();
@@ -264,6 +304,7 @@ const updateHud = (): void => {
 
   const result = game.getResultState();
   resultPanel.classList.toggle("show", result.complete);
+  resultRunMode.textContent = `Mode: ${result.ruleset}/${result.rideStyle}`;
   resultScore.textContent = `Score: ${result.score}`;
   const medal = result.accuracy >= 0.92 ? "S" : result.accuracy >= 0.82 ? "A" : result.accuracy >= 0.68 ? "B" : "C";
   resultMedal.textContent = `Medal: ${medal}`;
@@ -276,20 +317,26 @@ const updateHud = (): void => {
   resultPersonalBest.textContent = `Personal Best: ${personalBest}`;
   resultAccuracy.textContent = `Accuracy: ${(result.accuracy * 100).toFixed(1)}%`;
   resultMaxCombo.textContent = `Max Combo: ${result.maxCombo}`;
-  resultBreakdown.textContent = `P:${result.perfect} G:${result.great} g:${result.good} M:${result.miss}`;
+  resultBreakdown.textContent = `P:${result.perfect} G:${result.great} g:${result.good} M:${result.miss} Notes:${result.totalNotes}`;
   resultTypes.textContent = `Tap:${result.tapHits} Hold:${result.holdHits} Slide:${result.slideHits} Double:${result.doubleHits} Mines:${result.mineHits}`;
   resultTech.textContent = `Hold C/B:${result.holdCompleted}/${result.holdBroken} Slide C/B:${result.slideCompleted}/${result.slideBroken}`;
 
   if (result.complete && !previousResultComplete) {
     session.clears += 1;
+    session.streak += 1;
     session.bestCombo = Math.max(session.bestCombo, result.maxCombo);
     profile.clears += 1;
     profile.totalScore += result.score;
     profile.bestAccuracy = Math.max(profile.bestAccuracy, result.accuracy);
     profile.bestCombo = Math.max(profile.bestCombo, result.maxCombo);
+    profile.longestClearStreak = Math.max(profile.longestClearStreak, session.streak);
+    profile.bestByRuleset[result.ruleset] = Math.max(profile.bestByRuleset[result.ruleset], result.score);
     profile.missions.combo50 = profile.missions.combo50 || result.maxCombo >= 50;
     profile.missions.combo100 = profile.missions.combo100 || result.maxCombo >= 100;
     profile.missions.accuracy90 = profile.missions.accuracy90 || result.accuracy >= 0.9;
+    profile.missions.clearCruise = profile.missions.clearCruise || result.ruleset === "cruise";
+    profile.missions.clearPrecision = profile.missions.clearPrecision || result.ruleset === "precision";
+    profile.missions.clearAssault = profile.missions.clearAssault || result.ruleset === "assault";
     saveProfile();
     updateProfileUi();
   }
@@ -344,6 +391,18 @@ tabProfileBtn.addEventListener("click", () => setTab("profile"));
 
 gameModeSelect.addEventListener("change", () => {
   game.setGameMode(gameModeSelect.value as GameMode);
+});
+
+rideStyleSelect.addEventListener("change", () => {
+  const style = rideStyleSelect.value as RideStyle;
+  game.setRideStyle(style);
+  localStorage.setItem(RIDE_STYLE_KEY, style);
+});
+
+rulesetSelect.addEventListener("change", () => {
+  const ruleset = rulesetSelect.value as RulesetMode;
+  game.setRuleset(ruleset);
+  localStorage.setItem(RULESET_KEY, ruleset);
 });
 
 difficultySelect.addEventListener("change", () => {

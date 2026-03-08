@@ -3,7 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { AudioAnalyzer } from "../audio/AudioAnalyzer";
 import { AudioManager } from "../audio/AudioManager";
 import { BeatDetector } from "../audio/BeatDetector";
-import { BeatMapGenerator, GeneratorDebugData, SpawnEvent } from "../audio/BeatMapGenerator";
+import { BeatMapGenerator, GeneratorDebugData, RulesetMode, SpawnEvent } from "../audio/BeatMapGenerator";
 import { BeatPulseEffect } from "../effects/BeatPulseEffect";
 import { ComboRingEffect } from "../effects/ComboRingEffect";
 import { FrequencySideRailsEffect } from "../effects/FrequencySideRailsEffect";
@@ -28,6 +28,8 @@ import { Time } from "./Time";
 export type DifficultyMode = "chill" | "normal" | "hyper";
 export type QualityMode = "auto" | "high" | "medium" | "low";
 export type GameMode = "chart" | "endless" | "practice";
+export type RideStyle = "flow" | "burst" | "technical";
+export type { RulesetMode };
 
 export class Game {
   private readonly renderer: Renderer;
@@ -62,6 +64,8 @@ export class Game {
   private readonly pendingSpawnEvents: SpawnEvent[] = [];
 
   private difficulty: DifficultyMode = "normal";
+  private rideStyle: RideStyle = "flow";
+  private ruleset: RulesetMode = "cruise";
   private timingOffsetMs = 0;
   private sectionEnergy = 0;
   private sectionTrend = 0;
@@ -152,6 +156,8 @@ export class Game {
     this.setEffectIntensity(1);
     this.setLaneTolerance(0.55);
     this.setDifficulty("normal");
+    this.setRideStyle("flow");
+    this.setRuleset("cruise");
     this.setGameMode("chart");
 
     this.gameLoop = new GameLoop(this.update);
@@ -306,6 +312,28 @@ export class Game {
     return this.difficulty;
   }
 
+  public setRideStyle(style: RideStyle): void {
+    this.rideStyle = style;
+    this.beatMapGenerator.setRideStyle(style);
+    this.scoreSystem.setRideStyle(style);
+    this.regenerateBeatMap();
+  }
+
+  public getRideStyle(): RideStyle {
+    return this.rideStyle;
+  }
+
+  public setRuleset(ruleset: RulesetMode): void {
+    this.ruleset = ruleset;
+    this.beatMapGenerator.setRuleset(ruleset);
+    this.scoreSystem.setRuleset(ruleset);
+    this.regenerateBeatMap();
+  }
+
+  public getRuleset(): RulesetMode {
+    return this.ruleset;
+  }
+
   public getCurrentAudioTime(): number {
     return this.audioManager.getCurrentTime();
   }
@@ -422,6 +450,8 @@ export class Game {
   public getResultState(): Readonly<{
     complete: boolean;
     score: number;
+    ruleset: RulesetMode;
+    rideStyle: RideStyle;
     maxCombo: number;
     accuracy: number;
     perfect: number;
@@ -437,10 +467,13 @@ export class Game {
     holdBroken: number;
     slideCompleted: number;
     slideBroken: number;
+    totalNotes: number;
   }> {
     return {
       complete: this.songFinished,
       score: Math.floor(this.scoreSystem.score),
+      ruleset: this.ruleset,
+      rideStyle: this.rideStyle,
       maxCombo: this.scoreSystem.maxCombo,
       accuracy: this.scoreSystem.getAccuracy(),
       perfect: this.scoreSystem.perfect,
@@ -455,7 +488,8 @@ export class Game {
       holdCompleted: this.scoreSystem.holdCompleted,
       holdBroken: this.scoreSystem.holdBroken,
       slideCompleted: this.scoreSystem.slideCompleted,
-      slideBroken: this.scoreSystem.slideBroken
+      slideBroken: this.scoreSystem.slideBroken,
+      totalNotes: this.scoreSystem.totalNotes
     };
   }
 
@@ -619,7 +653,6 @@ export class Game {
       this.pendingSpawnEvents.length = 0;
       this.beatMapGenerator.popSpawnEvents(audioTime, this.pendingSpawnEvents);
       this.spawner.updateSpawnEvents(this.pendingSpawnEvents);
-
       const control = this.beatMapGenerator.sampleRuntimeControl(audioTime);
       this.track.setPlaybackTime(audioTime);
       this.cameraController.setTrackMotion(control.curvature, control.elevation, control.pace);

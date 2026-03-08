@@ -1,24 +1,16 @@
 import * as THREE from "three";
-import { LANE_WIDTH, LANES, NOTE_POOL_SIZE, SPAWN_DISTANCE } from "../core/Config";
-import { BeatMarkerEvent, SpawnEvent } from "../audio/BeatMapGenerator";
+import { LANE_WIDTH, NOTE_POOL_SIZE, SPAWN_DISTANCE } from "../core/Config";
+import { SpawnEvent } from "../audio/BeatMapGenerator";
 import { NoteType } from "../entities/Note";
 import { Note } from "../entities/Note";
 import { Track } from "./Track";
 
-const MARKER_POOL_SIZE = NOTE_POOL_SIZE * 3;
-
 export class NoteSpawner {
   public readonly instancedMesh: THREE.InstancedMesh;
-  public readonly markerMesh: THREE.InstancedMesh;
 
   private readonly notes: Note[] = [];
   private readonly freeIndices: number[] = [];
   private readonly activeIndices: number[] = [];
-
-  private readonly markerZ = new Float32Array(MARKER_POOL_SIZE);
-  private readonly markerIsBar = new Uint8Array(MARKER_POOL_SIZE);
-  private readonly markerFreeIndices: number[] = [];
-  private readonly markerActiveIndices: number[] = [];
 
   private readonly matrixDummy = new THREE.Object3D();
   private readonly emptyMatrix = new THREE.Matrix4().makeTranslation(0, -1000, 0);
@@ -36,8 +28,6 @@ export class NoteSpawner {
   };
   private readonly tempColor = new THREE.Color();
   private readonly mixedColor = new THREE.Color();
-  private readonly markerMainColor = new THREE.Color(0xe0f2fe);
-  private readonly markerBarColor = new THREE.Color(0xfef9c3);
   private effectIntensity = 1;
 
   public constructor(scene: THREE.Scene, private readonly track: Track) {
@@ -68,40 +58,12 @@ export class NoteSpawner {
       this.instancedMesh.setColorAt(i, this.laneColors[1]);
     }
 
-    const markerGeometry = new THREE.BoxGeometry(LANE_WIDTH * (LANES + 1), 0.12, 0.5);
-    const markerMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xe0f2fe,
-      emissive: 0x38bdf8,
-      emissiveIntensity: 1.8,
-      metalness: 0.35,
-      roughness: 0.22,
-      clearcoat: 0.45,
-      clearcoatRoughness: 0.16,
-      vertexColors: true
-    });
-    this.markerMesh = new THREE.InstancedMesh(markerGeometry, markerMaterial, MARKER_POOL_SIZE);
-    this.markerMesh.frustumCulled = false;
-    this.markerMesh.renderOrder = 1;
-
-    for (let i = 0; i < MARKER_POOL_SIZE; i += 1) {
-      this.markerFreeIndices.push(i);
-      this.markerMesh.setMatrixAt(i, this.emptyMatrix);
-      this.markerMesh.setColorAt(i, this.markerMainColor);
-      this.markerZ[i] = -1000;
-      this.markerIsBar[i] = 0;
-    }
-
     this.instancedMesh.instanceMatrix.needsUpdate = true;
     if (this.instancedMesh.instanceColor) {
       this.instancedMesh.instanceColor.needsUpdate = true;
     }
-    this.markerMesh.instanceMatrix.needsUpdate = true;
-    if (this.markerMesh.instanceColor) {
-      this.markerMesh.instanceColor.needsUpdate = true;
-    }
 
     scene.add(this.instancedMesh);
-    scene.add(this.markerMesh);
   }
 
   public updateSpawnEvents(spawns: readonly SpawnEvent[]): void {
@@ -128,27 +90,6 @@ export class NoteSpawner {
     }
   }
 
-  public spawnBeatMarkers(markers: readonly BeatMarkerEvent[]): void {
-    for (let i = 0; i < markers.length; i += 1) {
-      const marker = markers[i];
-      const idx = this.acquireMarker();
-      if (idx === null) {
-        continue;
-      }
-
-      this.markerZ[idx] = -SPAWN_DISTANCE;
-      this.markerIsBar[idx] = marker.isBarLine ? 1 : 0;
-      this.writeMarkerMatrix(idx);
-      this.markerMesh.setColorAt(idx, marker.isBarLine ? this.markerBarColor : this.markerMainColor);
-      this.markerActiveIndices.push(idx);
-    }
-
-    this.markerMesh.instanceMatrix.needsUpdate = true;
-    if (this.markerMesh.instanceColor) {
-      this.markerMesh.instanceColor.needsUpdate = true;
-    }
-  }
-
   public updateActiveNotes(deltaTime: number, trackSpeed: number): void {
     for (let i = this.activeIndices.length - 1; i >= 0; i -= 1) {
       const note = this.notes[this.activeIndices[i]];
@@ -156,24 +97,7 @@ export class NoteSpawner {
       this.writeMatrix(note);
     }
 
-    for (let i = this.markerActiveIndices.length - 1; i >= 0; i -= 1) {
-      const idx = this.markerActiveIndices[i];
-      this.markerZ[idx] += trackSpeed * deltaTime;
-
-      if (this.markerZ[idx] > 5) {
-        this.markerMesh.setMatrixAt(idx, this.emptyMatrix);
-        this.markerActiveIndices[i] = this.markerActiveIndices[this.markerActiveIndices.length - 1];
-        this.markerActiveIndices.pop();
-        this.markerFreeIndices.push(idx);
-        this.markerIsBar[idx] = 0;
-        continue;
-      }
-
-      this.writeMarkerMatrix(idx);
-    }
-
     this.instancedMesh.instanceMatrix.needsUpdate = true;
-    this.markerMesh.instanceMatrix.needsUpdate = true;
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
@@ -223,18 +147,8 @@ export class NoteSpawner {
       this.freeIndices.push(note.instanceId);
     }
 
-    for (let i = this.markerActiveIndices.length - 1; i >= 0; i -= 1) {
-      const idx = this.markerActiveIndices[i];
-      this.markerMesh.setMatrixAt(idx, this.emptyMatrix);
-      this.markerFreeIndices.push(idx);
-      this.markerIsBar[idx] = 0;
-      this.markerZ[idx] = -1000;
-    }
-
     this.activeIndices.length = 0;
-    this.markerActiveIndices.length = 0;
     this.instancedMesh.instanceMatrix.needsUpdate = true;
-    this.markerMesh.instanceMatrix.needsUpdate = true;
   }
 
   private acquireNote(): Note | null {
@@ -244,11 +158,6 @@ export class NoteSpawner {
     }
 
     return this.notes[idx];
-  }
-
-  private acquireMarker(): number | null {
-    const idx = this.markerFreeIndices.pop();
-    return idx === undefined ? null : idx;
   }
 
   private writeMatrix(note: Note): void {
@@ -279,14 +188,4 @@ export class NoteSpawner {
     this.instancedMesh.setMatrixAt(note.instanceId, this.matrixDummy.matrix);
   }
 
-  private writeMarkerMatrix(instanceId: number): void {
-    this.track.sampleLanePoint(this.markerZ[instanceId], 0, 0.12, this.worldPos);
-    this.track.sampleLaneQuaternion(this.markerZ[instanceId], 0, this.worldQuat);
-    this.matrixDummy.position.copy(this.worldPos);
-    this.matrixDummy.quaternion.copy(this.worldQuat);
-    const isBar = this.markerIsBar[instanceId] === 1;
-    this.matrixDummy.scale.set(1, isBar ? 1.8 : 1, 1);
-    this.matrixDummy.updateMatrix();
-    this.markerMesh.setMatrixAt(instanceId, this.matrixDummy.matrix);
-  }
 }

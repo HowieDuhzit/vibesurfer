@@ -6,6 +6,8 @@ import { SpawnEvent } from "./BeatMapGenerator";
 interface EventPlannerOptions {
   seed: number;
   difficulty: "chill" | "normal" | "hyper";
+  rideStyle: "flow" | "burst" | "technical";
+  ruleset: "cruise" | "precision" | "assault";
   minGapSeconds: number;
   travelTime: number;
   timingOffsetSeconds: number;
@@ -84,7 +86,7 @@ export class EventPlanner {
         continue;
       }
 
-      const spawnChance = this.spawnChance(c, density, danger, novelty, options.difficulty, profile, anchorBoost);
+      const spawnChance = this.spawnChance(c, density, danger, novelty, options.difficulty, options.rideStyle, options.ruleset, profile, anchorBoost);
       if (nextRandom() > spawnChance) {
         continue;
       }
@@ -94,7 +96,7 @@ export class EventPlanner {
         continue;
       }
 
-      const type = this.pickType(c.strength, density, feature + profile.featureBias + anchorBoost * 0.15, options.difficulty, nextRandom);
+      const type = this.pickType(c.strength, density, feature + profile.featureBias + anchorBoost * 0.15, options.difficulty, options.rideStyle, options.ruleset, nextRandom);
       const duration = this.pickDuration(type, beatSeconds, options.difficulty, nextRandom);
       const slideToLane = type === "slide" ? this.pickSlideTarget(lane, nextRandom) : lane;
       const bassEnergy = this.computeBassEnergy(song, frame);
@@ -138,9 +140,20 @@ export class EventPlanner {
 
     events.sort((a, b) => a.beatTime - b.beatTime);
     const playable = this.playabilityPass(events, options.minGapSeconds, beatSeconds);
-    const normalized = this.normalizeDensity(playable, song.duration, options.difficulty, nextRandom, sectionByFrame, sectionCounts);
-    const patterned = this.applyPatternVocabulary(normalized, beatSeconds, options.difficulty, nextRandom, sectionByFrame, song.duration);
-    return this.survivabilityPass(patterned, beatSeconds, options.minGapSeconds, options.difficulty);
+    const normalized = this.normalizeDensity(playable, song.duration, options.difficulty, options.rideStyle, options.ruleset, nextRandom, sectionByFrame, sectionCounts);
+    const patterned = this.applyPatternVocabulary(normalized, beatSeconds, options.difficulty, options.rideStyle, options.ruleset, nextRandom, sectionByFrame, song.duration);
+    const anchored = this.applyAnchorPhrases(
+      patterned,
+      song,
+      track.anchorFrames,
+      beatSeconds,
+      options.travelTime,
+      options.timingOffsetSeconds,
+      options.rideStyle,
+      options.ruleset,
+      nextRandom
+    );
+    return this.survivabilityPass(anchored, beatSeconds, options.minGapSeconds, options.difficulty, options.rideStyle, options.ruleset);
   }
 
   private buildCandidates(song: SongAnalysis, rhythm: RhythmAnalysis, track: TrackPlan): Candidate[] {
@@ -156,6 +169,7 @@ export class EventPlanner {
     }
 
     const subdivision = Math.max(1, Math.floor(rhythm.beatPeriodFrames * 0.5));
+    const beatFramesSet = new Set<number>(rhythm.beatFrames.map((frame) => this.clampFrame(frame, song.frames.length)));
     for (let i = 0; i < rhythm.onsetFrames.length; i += 1) {
       const onset = this.clampFrame(rhythm.onsetFrames[i], song.frames.length);
       const snapped = subdivision > 1
@@ -168,7 +182,10 @@ export class EventPlanner {
 
       const onsetStrength = rhythm.onsetStrength[frame] ?? 0;
       const density = track.eventDensity[frame] ?? 0;
-      if (onsetStrength < 0.18 || density < 0.18) {
+      const nearestBeatFrame = this.findNearestBeatFrame(frame, beatFramesSet, Math.max(2, Math.floor(subdivision * 0.45)));
+      const beatAligned = nearestBeatFrame !== null;
+      const onsetThreshold = beatAligned ? 0.15 : 0.2;
+      if (onsetStrength < onsetThreshold || density < 0.16) {
         continue;
       }
 
@@ -191,12 +208,16 @@ export class EventPlanner {
     danger: number,
     novelty: number,
     difficulty: "chill" | "normal" | "hyper",
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault",
     profile: SectionProfile,
     anchorBoost: number
   ): number {
     const base = candidate.isBeat ? 0.62 : 0.34;
-    const diff = difficulty === "hyper" ? 0.2 : difficulty === "chill" ? -0.16 : 0;
-    const chance = base + density * 0.35 + danger * 0.2 + novelty * 0.16 + diff + profile.spawnBias + anchorBoost * 0.15;
+    const diff = difficulty === "hyper" ? 0.12 : difficulty === "chill" ? -0.12 : 0;
+    const styleBias = rideStyle === "burst" ? 0.1 : rideStyle === "technical" ? 0.03 : -0.03;
+    const rulesetBias = ruleset === "assault" ? 0.08 : ruleset === "precision" ? -0.04 : 0.02;
+    const chance = base + density * 0.35 + danger * 0.2 + novelty * 0.16 + diff + profile.spawnBias + anchorBoost * 0.15 + styleBias + rulesetBias;
     return Math.max(0.06, Math.min(0.95, chance));
   }
 
@@ -212,17 +233,23 @@ export class EventPlanner {
     const mids = Math.log1p(f.mid);
     const highs = Math.log1p(f.high);
 
+    const total = Math.max(1e-6, bass + mids + highs);
+    const lowNorm = bass / total;
+    const midNorm = mids / total;
+    const highNorm = highs / total;
+
     const weights = [0, 0, 0];
-    weights[0] = bass;
-    weights[1] = mids * 1.06;
-    weights[2] = highs;
+    weights[0] = 0.55 + lowNorm * 0.7 + midNorm * 0.12;
+    weights[1] = 0.65 + midNorm * 0.82 + lowNorm * 0.08 + highNorm * 0.08;
+    weights[2] = 0.55 + highNorm * 0.7 + midNorm * 0.12;
 
     const laneMean = (laneCounts[0] + laneCounts[1] + laneCounts[2]) / 3;
     for (let lane = 0; lane < LANES; lane += 1) {
-      const occupancyPenalty = (laneCounts[lane] - laneMean) * 0.04;
-      const jumpPenalty = Math.abs(lane - prevLane) >= 2 ? 0.12 : 0;
+      const occupancyPenalty = (laneCounts[lane] - laneMean) * 0.08;
+      const jumpPenalty = Math.abs(lane - prevLane) >= 2 ? 0.16 : 0;
+      const repeatPenalty = lane === prevLane ? 0.06 : 0;
       const jitter = (nextRandom() - 0.5) * 0.08;
-      weights[lane] = weights[lane] - occupancyPenalty - jumpPenalty + jitter;
+      weights[lane] = weights[lane] - occupancyPenalty - jumpPenalty - repeatPenalty + jitter;
     }
 
     let best = 0;
@@ -242,22 +269,28 @@ export class EventPlanner {
     density: number,
     feature: number,
     difficulty: "chill" | "normal" | "hyper",
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number
   ): NoteType {
     const r = nextRandom();
     const hard = difficulty === "hyper";
     const easy = difficulty === "chill";
+    const bursty = rideStyle === "burst";
+    const technical = rideStyle === "technical";
+    const assault = ruleset === "assault";
+    const precision = ruleset === "precision";
 
-    if (hard && feature > 0.62 && density > 0.55 && strength > 0.9 && r < 0.1) {
+    if ((hard || technical || assault) && feature > 0.62 && density > 0.55 && strength > 0.9 && r < (assault ? 0.18 : 0.1)) {
       return "mine";
     }
-    if (!easy && feature > 0.45 && strength > 0.78 && r < 0.2) {
+    if (!easy && (technical || bursty || precision) && feature > 0.45 && strength > 0.78 && r < (precision ? 0.34 : technical ? 0.28 : 0.2)) {
       return "slide";
     }
-    if (!easy && density > 0.52 && strength > 0.84 && r < (hard ? 0.17 : 0.1)) {
+    if (!easy && density > 0.52 && strength > 0.84 && r < (assault ? 0.26 : bursty ? 0.22 : hard ? 0.17 : 0.1)) {
       return "double";
     }
-    if (strength > 0.7 && r < (hard ? 0.28 : easy ? 0.12 : 0.2)) {
+    if (strength > 0.7 && r < (precision ? 0.18 : rideStyle === "flow" ? 0.3 : hard ? 0.28 : easy ? 0.12 : 0.2)) {
       return "hold";
     }
     return "tap";
@@ -345,6 +378,8 @@ export class EventPlanner {
     events: SpawnEvent[],
     duration: number,
     difficulty: "chill" | "normal" | "hyper",
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number,
     sectionByFrame: Int8Array,
     sectionCounts: readonly number[]
@@ -353,7 +388,16 @@ export class EventPlanner {
       return events;
     }
 
-    const targetNps = difficulty === "hyper" ? 2.9 : difficulty === "chill" ? 1.35 : 2.1;
+    const beatIntervals = this.estimateBeatIntervals(events);
+    const avgBeatSeconds = beatIntervals.length > 0
+      ? beatIntervals.reduce((sum, value) => sum + value, 0) / beatIntervals.length
+      : 0.5;
+    const bpm = 60 / Math.max(0.24, avgBeatSeconds);
+    const tempoFactor = Math.max(0.85, Math.min(1.22, bpm / 130));
+    const styleNpsBias = rideStyle === "burst" ? 0.35 : rideStyle === "technical" ? 0.15 : -0.1;
+    const rulesetBias = ruleset === "assault" ? 0.4 : ruleset === "precision" ? -0.15 : 0;
+    const targetNpsBase = (difficulty === "hyper" ? 2.25 : difficulty === "chill" ? 1.2 : 1.9) + styleNpsBias + rulesetBias;
+    const targetNps = targetNpsBase * tempoFactor;
     const maxEvents = Math.max(6, Math.floor(targetNps * duration));
     const sorted = events.slice().sort((a, b) => a.beatTime - b.beatTime);
 
@@ -402,6 +446,20 @@ export class EventPlanner {
     }
 
     return this.injectRests(sorted, difficulty, sectionByFrame, sectionCounts);
+  }
+
+  private estimateBeatIntervals(events: readonly SpawnEvent[]): number[] {
+    const out: number[] = [];
+    for (let i = 1; i < events.length; i += 1) {
+      const dt = events[i].beatTime - events[i - 1].beatTime;
+      if (dt > 0.12 && dt < 1.2) {
+        out.push(dt);
+      }
+      if (out.length >= 48) {
+        break;
+      }
+    }
+    return out;
   }
 
   private injectRests(
@@ -458,6 +516,8 @@ export class EventPlanner {
     events: SpawnEvent[],
     beatSeconds: number,
     difficulty: "chill" | "normal" | "hyper",
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number,
     sectionByFrame: Int8Array,
     duration: number
@@ -512,12 +572,15 @@ export class EventPlanner {
         spec = versePatterns[Math.floor(nextRandom() * versePatterns.length)];
       }
 
-      const mirror = difficulty === "hyper" ? nextRandom() < 0.5 : nextRandom() < 0.35;
-      const maxStep = difficulty === "hyper" ? 2 : 1;
+      const mirror = difficulty === "hyper" || ruleset === "precision" ? nextRandom() < 0.5 : nextRandom() < 0.35;
+      const maxStep = difficulty === "hyper" || rideStyle === "technical" || ruleset === "precision" ? 2 : 1;
       for (let bi = 0; bi < bucket.length; bi += 1) {
         const idx = bucket[bi];
         const rawLane = spec.lanes[bi % spec.lanes.length];
-        const lane = mirror ? (LANES - 1 - rawLane) : rawLane;
+        let lane = mirror ? (LANES - 1 - rawLane) : rawLane;
+        if (rideStyle === "flow" && ruleset !== "assault" && bi % 3 === 1) {
+          lane = 1;
+        }
         const nextLane = this.stepLaneToward(prevLane, lane, maxStep);
         out[idx].lane = nextLane;
         if (out[idx].type === "slide") {
@@ -533,19 +596,84 @@ export class EventPlanner {
     return out;
   }
 
+  private applyAnchorPhrases(
+    events: SpawnEvent[],
+    song: SongAnalysis,
+    anchorFrames: readonly number[],
+    beatSeconds: number,
+    travelTime: number,
+    timingOffsetSeconds: number,
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault",
+    nextRandom: () => number
+  ): SpawnEvent[] {
+    if (events.length === 0 || anchorFrames.length === 0) {
+      return events;
+    }
+
+    const out = events.map((event) => ({ ...event }));
+    const windowRadius = Math.max(beatSeconds * 0.9, 0.42);
+
+    for (let i = 0; i < anchorFrames.length; i += 1) {
+      const frame = this.clampFrame(anchorFrames[i], song.frames.length);
+      const anchorTime = song.frames[frame]?.time ?? 0;
+      const nearby = out.filter((event) => Math.abs(event.beatTime - anchorTime) <= windowRadius);
+      if (nearby.length >= (ruleset === "assault" ? 5 : rideStyle === "burst" ? 4 : 3)) {
+        continue;
+      }
+
+      const baseLane = rideStyle === "technical"
+        ? (nextRandom() < 0.5 ? 0 : 2)
+        : rideStyle === "burst"
+          ? (nextRandom() < 0.5 ? 0 : 2)
+          : 1;
+      const phrase = this.anchorPattern(baseLane, rideStyle, ruleset);
+      const offsetStep = beatSeconds * 0.5;
+
+      for (let p = 0; p < phrase.length; p += 1) {
+        const beatTime = anchorTime + (p - Math.floor(phrase.length / 2)) * offsetStep;
+        if (beatTime <= travelTime || beatTime >= song.duration - 0.05) {
+          continue;
+        }
+
+        const lane = phrase[p];
+        out.push({
+          spawnTime: beatTime - travelTime + timingOffsetSeconds,
+          beatTime: beatTime + timingOffsetSeconds,
+          lane,
+          bassEnergy: 120,
+          type: rideStyle === "flow" && ruleset !== "precision" && p === Math.floor(phrase.length / 2) ? "hold" : "tap",
+          duration: rideStyle === "flow" && ruleset !== "precision" && p === Math.floor(phrase.length / 2) ? Math.max(0.26, beatSeconds * 0.75) : 0,
+          slideToLane: lane
+        });
+      }
+    }
+
+    out.sort((a, b) => a.beatTime - b.beatTime);
+    return out;
+  }
+
   private survivabilityPass(
     events: SpawnEvent[],
     beatSeconds: number,
     minGapSeconds: number,
-    difficulty: "chill" | "normal" | "hyper"
+    difficulty: "chill" | "normal" | "hyper",
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault"
   ): SpawnEvent[] {
     if (events.length <= 2) {
       return events;
     }
 
     const out: SpawnEvent[] = [];
-    const switchTime = difficulty === "hyper" ? 0.17 : difficulty === "chill" ? 0.24 : 0.2;
-    const minMineGap = Math.max(minGapSeconds * 1.2, beatSeconds * 0.75);
+    const switchTime = rideStyle === "technical"
+      ? 0.16
+      : difficulty === "hyper"
+        ? 0.17
+        : difficulty === "chill"
+          ? 0.24
+          : 0.2;
+    const minMineGap = Math.max(minGapSeconds * (ruleset === "assault" ? 1.05 : 1.2), beatSeconds * (ruleset === "assault" ? 0.62 : 0.75));
     let lastTime = events[0].beatTime;
     let currentLane = 1;
     let lastMineTime = -Infinity;
@@ -674,5 +802,39 @@ export class EventPlanner {
 
   private clampFrame(frame: number, length: number): number {
     return Math.max(0, Math.min(length - 1, frame));
+  }
+
+  private anchorPattern(
+    baseLane: number,
+    rideStyle: "flow" | "burst" | "technical",
+    ruleset: "cruise" | "precision" | "assault"
+  ): readonly number[] {
+    if (ruleset === "assault") {
+      return baseLane === 0 ? [0, 1, 2, 2, 1] : [2, 1, 0, 0, 1];
+    }
+    if (ruleset === "precision") {
+      return baseLane === 0 ? [0, 1, 2, 1, 0] : [2, 1, 0, 1, 2];
+    }
+    if (rideStyle === "burst") {
+      return baseLane === 0 ? [0, 1, 2, 1] : [2, 1, 0, 1];
+    }
+    if (rideStyle === "technical") {
+      return baseLane === 0 ? [0, 1, 0, 2] : [2, 1, 2, 0];
+    }
+    return [1, baseLane, 1];
+  }
+
+  private findNearestBeatFrame(frame: number, beatFrames: ReadonlySet<number>, window: number): number | null {
+    for (let d = 0; d <= window; d += 1) {
+      const lo = frame - d;
+      if (beatFrames.has(lo)) {
+        return lo;
+      }
+      const hi = frame + d;
+      if (beatFrames.has(hi)) {
+        return hi;
+      }
+    }
+    return null;
   }
 }

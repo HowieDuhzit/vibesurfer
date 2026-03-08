@@ -6,6 +6,7 @@ interface FeatureWindow {
   endFrame: number;
   kind: "hill" | "corkscrew" | "loop";
   strength: number;
+  sectionLabel: SongSection["label"];
 }
 
 interface SectionProfile {
@@ -112,7 +113,7 @@ export class TrackPlanner {
     const minGap = Math.max(rhythm.beatPeriodFrames * 18, Math.floor(song.frames.length / 10));
     const picked: FeatureWindow[] = [];
     let lastCenter = -minGap;
-    let rank = 0;
+    let loopPlaced = false;
 
     for (let i = 0; i < anchors.length; i += 1) {
       const centerFrame = anchors[i];
@@ -129,15 +130,17 @@ export class TrackPlanner {
         0,
         1
       );
+      const section = this.getSectionForFrame(centerFrame, structure.sections);
       const span = Math.max(rhythm.beatPeriodFrames * 8, 56);
       const halfSpan = Math.floor(span * (0.6 + strength * 0.7));
       const startFrame = Math.max(4, centerFrame - halfSpan);
       const endFrame = Math.min(song.frames.length - 5, centerFrame + halfSpan);
 
       let kind: FeatureWindow["kind"] = "hill";
-      if (rank === 0 && strength > 0.62) {
+      if (!loopPlaced && section.label === "chorus" && strength > 0.72) {
         kind = "loop";
-      } else if (rank % 2 === 0 && strength > 0.52) {
+        loopPlaced = true;
+      } else if ((section.label === "chorus" || section.label === "verse") && strength > 0.54) {
         kind = "corkscrew";
       }
 
@@ -146,10 +149,10 @@ export class TrackPlanner {
         startFrame,
         endFrame,
         kind,
-        strength
+        strength,
+        sectionLabel: section.label
       });
       lastCenter = centerFrame;
-      rank += 1;
     }
 
     return picked;
@@ -166,6 +169,7 @@ export class TrackPlanner {
       const feature = features[i];
       const span = Math.max(1, feature.endFrame - feature.startFrame);
       const panDrift = 0.08 + feature.strength * 0.12;
+      const sectionScale = feature.sectionLabel === "chorus" ? 1.15 : feature.sectionLabel === "breakdown" ? 0.82 : 1;
 
       for (let frame = feature.startFrame; frame <= feature.endFrame; frame += 1) {
         const phase = (frame - feature.startFrame) / span;
@@ -173,17 +177,27 @@ export class TrackPlanner {
         const wave = Math.sin(phase * Math.PI);
 
         if (feature.kind === "hill") {
-          tilt[frame] += Math.sin(phase * Math.PI * 2) * (0.08 + feature.strength * 0.18);
-          elevation[frame] += wave * (0.18 + feature.strength * 0.32);
+          tilt[frame] += Math.sin(phase * Math.PI * 2) * (0.08 + feature.strength * 0.18) * sectionScale;
+          elevation[frame] += wave * (0.18 + feature.strength * 0.32) * sectionScale;
         } else if (feature.kind === "corkscrew") {
-          roll[frame] += eased * Math.PI * 2;
-          tilt[frame] += Math.sin(phase * Math.PI) * (0.06 + feature.strength * 0.08);
+          roll[frame] += eased * Math.PI * 2 * sectionScale;
+          tilt[frame] += Math.sin(phase * Math.PI) * (0.06 + feature.strength * 0.08) * sectionScale;
+          pan[frame] += Math.sin(phase * Math.PI) * panDrift * 0.55;
         } else {
-          tilt[frame] += -eased * Math.PI * 2;
-          pan[frame] += Math.sin(phase * Math.PI) * panDrift;
-          roll[frame] += Math.sin(phase * Math.PI * 2) * (0.22 + feature.strength * 0.2);
-          elevation[frame] += wave * (0.22 + feature.strength * 0.35);
+          tilt[frame] += -eased * Math.PI * 2 * sectionScale;
+          pan[frame] += Math.sin(phase * Math.PI) * panDrift * sectionScale;
+          roll[frame] += Math.sin(phase * Math.PI * 2) * (0.22 + feature.strength * 0.2) * sectionScale;
+          elevation[frame] += wave * (0.22 + feature.strength * 0.35) * sectionScale;
         }
+      }
+
+      const recoveryEnd = Math.min(tilt.length - 1, feature.endFrame + Math.max(8, Math.floor(span * 0.28)));
+      for (let frame = feature.endFrame + 1; frame <= recoveryEnd; frame += 1) {
+        const t = (frame - feature.endFrame) / Math.max(1, recoveryEnd - feature.endFrame);
+        const damping = 1 - t * 0.45;
+        tilt[frame] *= damping;
+        roll[frame] *= 1 - t * 0.5;
+        pan[frame] *= 1 - t * 0.18;
       }
     }
   }

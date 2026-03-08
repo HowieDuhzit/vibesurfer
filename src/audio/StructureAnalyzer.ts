@@ -112,16 +112,35 @@ export class StructureAnalyzer {
       boundaries.push(frameCount - 1);
     }
 
+    const means: number[] = [];
+    const noveltyMeans: number[] = [];
     for (let i = 0; i < boundaries.length - 1; i += 1) {
       const start = boundaries[i];
       const end = Math.max(start, boundaries[i + 1] - 1);
       let mean = 0;
+      let noveltyMean = 0;
       for (let f = start; f <= end; f += 1) {
         mean += energy[f];
+        noveltyMean += novelty[f];
       }
       mean /= (end - start + 1);
+      noveltyMean /= (end - start + 1);
+      means.push(mean);
+      noveltyMeans.push(noveltyMean);
+    }
 
-      const label = this.sectionLabel(i, boundaries.length - 1, mean);
+    const e33 = this.percentile(means, 0.33);
+    const e66 = this.percentile(means, 0.66);
+    const n66 = this.percentile(noveltyMeans, 0.66);
+
+    for (let i = 0; i < boundaries.length - 1; i += 1) {
+      const start = boundaries[i];
+      const end = Math.max(start, boundaries[i + 1] - 1);
+      const mean = means[i] ?? 0;
+      const noveltyMean = noveltyMeans[i] ?? 0;
+      const prevMean = means[Math.max(0, i - 1)] ?? mean;
+      const delta = mean - prevMean;
+      const label = this.sectionLabel(i, boundaries.length - 1, mean, noveltyMean, delta, e33, e66, n66);
       sections.push({
         startFrame: start,
         endFrame: end,
@@ -176,18 +195,34 @@ export class StructureAnalyzer {
     return this.unique(out);
   }
 
-  private sectionLabel(index: number, sectionCount: number, mean: number): SongSection["label"] {
-    if (index === 0 && mean < 0.35) {
+  private sectionLabel(
+    index: number,
+    sectionCount: number,
+    mean: number,
+    noveltyMean: number,
+    deltaFromPrev: number,
+    energyP33: number,
+    energyP66: number,
+    noveltyP66: number
+  ): SongSection["label"] {
+    if (index === 0 && mean <= energyP33 + 0.03) {
       return "intro";
     }
-    if (index === sectionCount - 1 && mean < 0.4) {
+    if (index === sectionCount - 1 && mean <= energyP33 + 0.05) {
       return "outro";
     }
-    if (mean >= 0.7) {
-      return "breakdown";
-    }
-    if (mean >= 0.5) {
+
+    const highEnergy = mean >= energyP66;
+    const lowEnergy = mean <= energyP33;
+    const highNovelty = noveltyMean >= noveltyP66;
+    const rising = deltaFromPrev > 0.08;
+    const dropping = deltaFromPrev < -0.08;
+
+    if (highEnergy && (highNovelty || rising)) {
       return "chorus";
+    }
+    if (lowEnergy && (highNovelty || dropping)) {
+      return "breakdown";
     }
     return "verse";
   }

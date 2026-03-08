@@ -22,6 +22,7 @@ export interface BeatMarkerEvent {
   spawnTime: number;
   beatTime: number;
   isBarLine: boolean;
+  isAnchor: boolean;
 }
 
 export interface GeneratorDebugData {
@@ -60,6 +61,9 @@ export interface RuntimeControlSample {
   feature: number;
 }
 
+export type RideStyle = "flow" | "burst" | "technical";
+export type RulesetMode = "cruise" | "precision" | "assault";
+
 export class BeatMapGenerator {
   private readonly queue: SpawnEvent[] = [];
   private readonly beatMarkerQueue: BeatMarkerEvent[] = [];
@@ -81,6 +85,8 @@ export class BeatMapGenerator {
   private timingOffsetSeconds = 0.01;
   private minNoteGapSeconds = 0.14;
   private difficulty: "chill" | "normal" | "hyper" = "normal";
+  private rideStyle: RideStyle = "flow";
+  private ruleset: RulesetMode = "cruise";
   private activeSongDuration = 1;
   private activeTrack: TrackPlan | null = null;
   private activeNovelty: Float32Array | null = null;
@@ -159,6 +165,8 @@ export class BeatMapGenerator {
     const events = this.eventPlanner.plan(song, rhythm, structure, track, {
       seed: this.mapSeed,
       difficulty: this.difficulty,
+      rideStyle: this.rideStyle,
+      ruleset: this.ruleset,
       minGapSeconds: this.minNoteGapSeconds,
       travelTime,
       timingOffsetSeconds: this.timingOffsetSeconds
@@ -171,7 +179,7 @@ export class BeatMapGenerator {
 
     this.updateDiagnostics(events, song.duration);
 
-    this.buildBeatMarkerGrid(song, rhythm.beatFrames, travelTime);
+    this.buildBeatMarkerGrid(song, rhythm.beatFrames, structure.bigMomentFrames, travelTime);
 
     if (this.queue.length === 0) {
       this.generateFallbackGrid(buffer.duration || 1);
@@ -275,9 +283,27 @@ export class BeatMapGenerator {
     this.minNoteGapSeconds = difficulty === "hyper" ? 0.11 : difficulty === "chill" ? 0.18 : 0.14;
   }
 
-  private buildBeatMarkerGrid(song: ReturnType<SongAnalyzer["analyze"]>, beatFrames: number[], travelTime: number): void {
+  public setRideStyle(rideStyle: RideStyle): void {
+    this.rideStyle = rideStyle;
+  }
+
+  public setRuleset(ruleset: RulesetMode): void {
+    this.ruleset = ruleset;
+  }
+
+  public getRuleset(): RulesetMode {
+    return this.ruleset;
+  }
+
+  private buildBeatMarkerGrid(
+    song: ReturnType<SongAnalyzer["analyze"]>,
+    beatFrames: number[],
+    anchorFrames: readonly number[],
+    travelTime: number
+  ): void {
     this.beatMarkerQueue.length = 0;
     let beatIndex = 0;
+    const anchorSet = new Set<number>(anchorFrames.map((frame) => Math.max(0, Math.min(song.frames.length - 1, frame))));
 
     for (let i = 0; i < beatFrames.length; i += 1) {
       const frame = Math.max(0, Math.min(song.frames.length - 1, beatFrames[i]));
@@ -289,10 +315,27 @@ export class BeatMapGenerator {
       this.beatMarkerQueue.push({
         spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
         beatTime: beatTime + this.timingOffsetSeconds,
-        isBarLine: beatIndex % 4 === 0
+        isBarLine: beatIndex % 4 === 0,
+        isAnchor: anchorSet.has(frame)
       });
       beatIndex += 1;
     }
+
+    for (let i = 0; i < anchorFrames.length; i += 1) {
+      const frame = Math.max(0, Math.min(song.frames.length - 1, anchorFrames[i]));
+      const beatTime = song.frames[frame]?.time ?? 0;
+      if (beatTime < travelTime || beatTime >= song.duration) {
+        continue;
+      }
+      this.beatMarkerQueue.push({
+        spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
+        beatTime: beatTime + this.timingOffsetSeconds,
+        isBarLine: true,
+        isAnchor: true
+      });
+    }
+
+    this.beatMarkerQueue.sort((a, b) => a.beatTime - b.beatTime);
   }
 
   private compactPlan(track: TrackPlan, novelty: Float32Array): GeneratorDebugData["plan"] {
@@ -432,7 +475,8 @@ export class BeatMapGenerator {
       this.beatMarkerQueue.push({
         spawnTime: event.spawnTime,
         beatTime: event.beatTime,
-        isBarLine: Math.floor((beatTime - 0.5) / beatInterval) % 4 === 0
+        isBarLine: Math.floor((beatTime - 0.5) / beatInterval) % 4 === 0,
+        isAnchor: false
       });
       lane = (lane + 1) % LANES;
     }
