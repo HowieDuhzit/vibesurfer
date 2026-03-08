@@ -137,6 +137,10 @@ export class Track {
     this.updateVisibleTrack();
   }
 
+  public getPlaybackSpeedScale(): number {
+    return this.samplePlanScalar(this.activePlan.speedScale, this.currentTime, 1);
+  }
+
   public setControlProfile(_elevation: number, _curvature: number, _pace: number, _feature: number): void {
     // The track is immutable during play; runtime control data is now used for
     // camera/effects only. Keep this method for call-site compatibility.
@@ -189,6 +193,9 @@ export class Track {
     this.tempEuler.setFromQuaternion(this.anchorSample.quaternion, "YXZ");
     this.riderPitch = this.tempEuler.x;
     this.riderBank = this.tempEuler.z;
+    const speedScale = this.getPlaybackSpeedScale();
+    const visibleLength = this.totalCurveLength * THREE.MathUtils.lerp(0.9, 1.28, this.clamp((speedScale - 0.72) / (1.6 - 0.72), 0, 1));
+    const visibleRear = this.rearLength * THREE.MathUtils.lerp(0.9, 1.12, this.clamp((speedScale - 0.72) / (1.6 - 0.72), 0, 1));
 
     for (let s = 0; s < this.surfaces.length; s += 1) {
       const surface = this.surfaces[s];
@@ -197,7 +204,7 @@ export class Track {
 
       for (let zi = 0; zi <= this.lengthSegments; zi += 1) {
         const u = zi / this.lengthSegments;
-        const trackZ = this.rearLength - u * this.totalCurveLength;
+        const trackZ = visibleRear - u * visibleLength;
         this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
 
         for (let xi = 0; xi < across; xi += 1) {
@@ -218,7 +225,6 @@ export class Track {
   private sampleRelativeFrame(timeSeconds: number, out: FrameSample): void {
     this.sampleGlobalFrame(this.currentTime, this.anchorSample);
     this.sampleGlobalFrame(timeSeconds, this.sampleA);
-
     const forwardFlat = this.tempVec.copy(this.anchorSample.tangent);
     forwardFlat.y = 0;
     if (forwardFlat.lengthSq() < 1e-8) {
@@ -297,7 +303,8 @@ export class Track {
     for (let i = 1; i < count; i += 1) {
       const prevPos = this.globalPositions[i - 1];
       const dir = this.tempVec.copy(this.globalTangents[i - 1]).lerp(this.globalTangents[i], 0.5).normalize();
-      this.globalPositions[i] = prevPos.clone().addScaledVector(dir, TRACK_SPEED * dt);
+      const plannedDistance = this.getPlannedDistanceStep(i, dt);
+      this.globalPositions[i] = prevPos.clone().addScaledVector(dir, plannedDistance);
     }
 
     for (let i = 1; i < count; i += 1) {
@@ -309,26 +316,22 @@ export class Track {
         axis.multiplyScalar(1 / axisLen);
         const angle = Math.acos(this.clamp(prevTangent.dot(this.globalTangents[i]), -1, 1));
         rotateQuat.setFromAxisAngle(axis, angle);
-        this.globalRights[i] = this.globalRights[i - 1].clone().applyQuaternion(rotateQuat).normalize();
-        this.globalUps[i] = this.globalUps[i - 1].clone().applyQuaternion(rotateQuat).normalize();
+        this.globalRights[i] = this.globalRights[i - 1].clone().applyQuaternion(rotateQuat);
+        this.globalUps[i] = this.globalUps[i - 1].clone().applyQuaternion(rotateQuat);
       } else {
         this.globalRights[i] = this.globalRights[i - 1].clone();
         this.globalUps[i] = this.globalUps[i - 1].clone();
       }
 
-      if (this.globalUps[i].dot(this.worldUp) < -0.2) {
-        this.globalRights[i].multiplyScalar(-1);
-        this.globalUps[i].multiplyScalar(-1);
-      }
-      this.globalRights[i].crossVectors(this.globalUps[i], this.globalTangents[i]).normalize();
-      this.globalUps[i].crossVectors(this.globalTangents[i], this.globalRights[i]).normalize();
+      this.orthonormalizeFrame(this.globalTangents[i], this.globalRights[i], this.globalUps[i]);
     }
 
     for (let i = 0; i < count; i += 1) {
       const roll = this.activePlan.roll[i] ?? 0;
       this.tempRollQuat.setFromAxisAngle(this.globalTangents[i], roll);
-      this.globalRights[i].applyQuaternion(this.tempRollQuat).normalize();
-      this.globalUps[i].applyQuaternion(this.tempRollQuat).normalize();
+      this.globalRights[i].applyQuaternion(this.tempRollQuat);
+      this.globalUps[i].applyQuaternion(this.tempRollQuat);
+      this.orthonormalizeFrame(this.globalTangents[i], this.globalRights[i], this.globalUps[i]);
       this.tempMatrix.makeBasis(this.globalRights[i], this.globalUps[i], this.tempVec.copy(this.globalTangents[i]).multiplyScalar(-1));
       this.globalQuaternions[i] = new THREE.Quaternion().setFromRotationMatrix(this.tempMatrix);
     }
@@ -390,6 +393,8 @@ export class Track {
     const elevation = new Float32Array(count);
     const curvature = new Float32Array(count);
     const pace = new Float32Array(count);
+    const speedScale = new Float32Array(count);
+    const cumulativeDistance = new Float32Array(count);
     const eventDensity = new Float32Array(count);
     const dangerLevel = new Float32Array(count);
     const featureEligibility = new Float32Array(count);
@@ -402,6 +407,8 @@ export class Track {
       elevation[i] = 0.2;
       curvature[i] = pan[i];
       pace[i] = 0.25;
+      speedScale[i] = 0.9;
+      cumulativeDistance[i] = i * (TRACK_SPEED * (this.planDuration / Math.max(1, count - 1)) * 0.9);
       eventDensity[i] = 0.2;
       dangerLevel[i] = 0.2;
       featureEligibility[i] = 0.1;
@@ -414,6 +421,8 @@ export class Track {
       elevation,
       curvature,
       pace,
+      speedScale,
+      cumulativeDistance,
       eventDensity,
       dangerLevel,
       featureEligibility,
@@ -429,6 +438,8 @@ export class Track {
       elevation: new Float32Array(plan.elevation),
       curvature: new Float32Array(plan.curvature),
       pace: new Float32Array(plan.pace),
+      speedScale: new Float32Array(plan.speedScale),
+      cumulativeDistance: new Float32Array(plan.cumulativeDistance),
       eventDensity: new Float32Array(plan.eventDensity),
       dangerLevel: new Float32Array(plan.dangerLevel),
       featureEligibility: new Float32Array(plan.featureEligibility),
@@ -448,6 +459,74 @@ export class Track {
 
   private clamp(value: number, min: number, max: number): number {
     return Math.max(min, Math.min(max, value));
+  }
+
+  private samplePlanScalar(source: Float32Array, timeSeconds: number, fallback: number): number {
+    if (source.length === 0) {
+      return fallback;
+    }
+    const normalized = this.clamp(timeSeconds / Math.max(1e-6, this.planDuration), 0, 0.999999);
+    const f = normalized * (source.length - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(source.length - 1, i0 + 1);
+    const t = f - i0;
+    return THREE.MathUtils.lerp(source[i0] ?? fallback, source[i1] ?? source[i0] ?? fallback, t);
+  }
+
+  private getPlannedDistanceStep(index: number, fallbackDt: number): number {
+    const distances = this.activePlan.cumulativeDistance;
+    if (index > 0 && index < distances.length) {
+      const delta = (distances[index] ?? 0) - (distances[index - 1] ?? 0);
+      if (Number.isFinite(delta) && delta > 1e-4) {
+        const minStep = TRACK_SPEED * fallbackDt * 0.68;
+        const maxStep = TRACK_SPEED * fallbackDt * 1.62;
+        return this.clamp(delta, minStep, maxStep);
+      }
+    }
+
+    const speedScale = this.activePlan.speedScale[index] ?? this.activePlan.speedScale[index - 1] ?? 1;
+    return TRACK_SPEED * fallbackDt * this.clamp(speedScale, 0.72, 1.6);
+  }
+
+  private orthonormalizeFrame(tangent: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3): void {
+    if (!this.isFiniteVector(tangent) || tangent.lengthSq() < 1e-8) {
+      tangent.set(0, 0, -1);
+    } else {
+      tangent.normalize();
+    }
+
+    if (!this.isFiniteVector(right) || right.lengthSq() < 1e-8) {
+      right.copy(this.pickFallbackRight(tangent));
+    }
+
+    up.crossVectors(tangent, right);
+    if (!this.isFiniteVector(up) || up.lengthSq() < 1e-8) {
+      right.copy(this.pickFallbackRight(tangent));
+      up.crossVectors(tangent, right);
+    }
+    up.normalize();
+
+    right.crossVectors(up, tangent);
+    if (!this.isFiniteVector(right) || right.lengthSq() < 1e-8) {
+      right.copy(this.pickFallbackRight(tangent));
+      up.crossVectors(tangent, right).normalize();
+    } else {
+      right.normalize();
+    }
+
+    if (up.dot(this.worldUp) < -0.2) {
+      right.multiplyScalar(-1);
+      up.multiplyScalar(-1);
+    }
+  }
+
+  private pickFallbackRight(tangent: THREE.Vector3): THREE.Vector3 {
+    const axis = Math.abs(tangent.y) > 0.92 ? this.backwardAxis : this.worldUp;
+    return this.tempVecB.crossVectors(axis, tangent).normalize();
+  }
+
+  private isFiniteVector(v: THREE.Vector3): boolean {
+    return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
   }
 
   private makeRoadTexture(): THREE.CanvasTexture {

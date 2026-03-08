@@ -61,7 +61,7 @@ export interface RuntimeControlSample {
   feature: number;
 }
 
-export type RideStyle = "flow" | "burst" | "technical";
+export type RideStyle = "classic" | "flow" | "burst" | "technical";
 export type RulesetMode = "cruise" | "precision" | "assault";
 
 export class BeatMapGenerator {
@@ -78,14 +78,14 @@ export class BeatMapGenerator {
     song: SongAnalysis;
     rhythm: RhythmAnalysis;
     structure: StructureAnalysis;
-    track: TrackPlan;
+    tracks: Partial<Record<RideStyle, TrackPlan>>;
   }>();
 
   private mapSeed = 123456789;
   private timingOffsetSeconds = 0.01;
   private minNoteGapSeconds = 0.14;
   private difficulty: "chill" | "normal" | "hyper" = "normal";
-  private rideStyle: RideStyle = "flow";
+  private rideStyle: RideStyle = "classic";
   private ruleset: RulesetMode = "cruise";
   private activeSongDuration = 1;
   private activeTrack: TrackPlan | null = null;
@@ -131,7 +131,7 @@ export class BeatMapGenerator {
     this.beatMarkerQueue.length = 0;
     this.lastGenerated.length = 0;
 
-    const travelTime = (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED;
+    const defaultTravelTime = (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED;
     if (buffer.duration <= 0.25) {
       this.generateFallbackGrid(buffer.duration || 1);
       return;
@@ -168,9 +168,11 @@ export class BeatMapGenerator {
       rideStyle: this.rideStyle,
       ruleset: this.ruleset,
       minGapSeconds: this.minNoteGapSeconds,
-      travelTime,
+      travelTime: defaultTravelTime,
       timingOffsetSeconds: this.timingOffsetSeconds
     });
+
+    this.retimeEventsForTrackDistance(events, track, song.duration);
 
     for (let i = 0; i < events.length; i += 1) {
       this.queue.push(events[i]);
@@ -179,7 +181,7 @@ export class BeatMapGenerator {
 
     this.updateDiagnostics(events, song.duration);
 
-    this.buildBeatMarkerGrid(song, rhythm.beatFrames, structure.bigMomentFrames, travelTime);
+    this.buildBeatMarkerGrid(song, rhythm.beatFrames, structure.bigMomentFrames, track, song.duration, defaultTravelTime);
 
     if (this.queue.length === 0) {
       this.generateFallbackGrid(buffer.duration || 1);
@@ -262,15 +264,15 @@ export class BeatMapGenerator {
       return this.runtimeSample;
     }
 
-    const normalized = Math.max(0, Math.min(0.99999, audioTime / this.activeSongDuration));
-    const index = Math.max(0, Math.min(track.elevation.length - 1, Math.floor(normalized * track.elevation.length)));
+    const pace = this.sampleTrackValue(track.pace, audioTime, 0);
+    const lookahead = 0.42 + pace * 0.48;
 
-    this.runtimeSample.elevation = track.elevation[index] ?? 0;
-    this.runtimeSample.curvature = track.curvature[index] ?? 0;
-    this.runtimeSample.pace = track.pace[index] ?? 0;
-    this.runtimeSample.density = track.eventDensity[index] ?? 0;
-    this.runtimeSample.danger = track.dangerLevel[index] ?? 0;
-    this.runtimeSample.feature = track.featureEligibility[index] ?? 0;
+    this.runtimeSample.elevation = this.blendLookahead(track.elevation, audioTime, lookahead, 0);
+    this.runtimeSample.curvature = this.blendLookahead(track.curvature, audioTime, lookahead, 0);
+    this.runtimeSample.pace = this.blendLookahead(track.pace, audioTime, lookahead, 0);
+    this.runtimeSample.density = this.blendLookahead(track.eventDensity, audioTime, lookahead, 0);
+    this.runtimeSample.danger = this.blendLookahead(track.dangerLevel, audioTime, lookahead, 0);
+    this.runtimeSample.feature = this.blendLookahead(track.featureEligibility, audioTime, lookahead, 0);
     return this.runtimeSample;
   }
 
@@ -299,7 +301,9 @@ export class BeatMapGenerator {
     song: ReturnType<SongAnalyzer["analyze"]>,
     beatFrames: number[],
     anchorFrames: readonly number[],
-    travelTime: number
+    track: TrackPlan,
+    duration: number,
+    defaultTravelTime: number
   ): void {
     this.beatMarkerQueue.length = 0;
     let beatIndex = 0;
@@ -308,12 +312,13 @@ export class BeatMapGenerator {
     for (let i = 0; i < beatFrames.length; i += 1) {
       const frame = Math.max(0, Math.min(song.frames.length - 1, beatFrames[i]));
       const beatTime = song.frames[frame]?.time ?? 0;
-      if (beatTime < travelTime || beatTime >= song.duration) {
+      const spawnTime = this.solveSpawnTimeForBeat(beatTime + this.timingOffsetSeconds, track, duration, defaultTravelTime);
+      if (spawnTime === null || beatTime >= song.duration) {
         continue;
       }
 
       this.beatMarkerQueue.push({
-        spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
+        spawnTime,
         beatTime: beatTime + this.timingOffsetSeconds,
         isBarLine: beatIndex % 4 === 0,
         isAnchor: anchorSet.has(frame)
@@ -324,11 +329,12 @@ export class BeatMapGenerator {
     for (let i = 0; i < anchorFrames.length; i += 1) {
       const frame = Math.max(0, Math.min(song.frames.length - 1, anchorFrames[i]));
       const beatTime = song.frames[frame]?.time ?? 0;
-      if (beatTime < travelTime || beatTime >= song.duration) {
+      const spawnTime = this.solveSpawnTimeForBeat(beatTime + this.timingOffsetSeconds, track, duration, defaultTravelTime);
+      if (spawnTime === null || beatTime >= song.duration) {
         continue;
       }
       this.beatMarkerQueue.push({
-        spawnTime: beatTime - travelTime + this.timingOffsetSeconds,
+        spawnTime,
         beatTime: beatTime + this.timingOffsetSeconds,
         isBarLine: true,
         isAnchor: true
@@ -380,17 +386,33 @@ export class BeatMapGenerator {
   } {
     const cached = this.analysisCache.get(buffer);
     if (cached) {
-      return cached;
+      let track = cached.tracks[this.rideStyle];
+      if (!track) {
+        track = this.trackPlanner.plan(cached.song, cached.rhythm, cached.structure, this.rideStyle);
+        cached.tracks[this.rideStyle] = track;
+      }
+      return {
+        song: cached.song,
+        rhythm: cached.rhythm,
+        structure: cached.structure,
+        track
+      };
     }
 
     const song = this.songAnalyzer.analyze(buffer);
     const rhythm = this.rhythmAnalyzer.analyze(song);
     const structure = this.structureAnalyzer.analyze(song, rhythm);
-    const track = this.trackPlanner.plan(song, rhythm, structure);
+    const tracks: Partial<Record<RideStyle, TrackPlan>> = {};
+    tracks[this.rideStyle] = this.trackPlanner.plan(song, rhythm, structure, this.rideStyle);
 
-    const next = { song, rhythm, structure, track };
+    const next = { song, rhythm, structure, tracks };
     this.analysisCache.set(buffer, next);
-    return next;
+    return {
+      song,
+      rhythm,
+      structure,
+      track: tracks[this.rideStyle] as TrackPlan
+    };
   }
 
   private updateDiagnostics(events: readonly SpawnEvent[], duration: number): void {
@@ -449,7 +471,85 @@ export class BeatMapGenerator {
     if (type === "mine") {
       return 4;
     }
+    if (type === "power") {
+      return 5;
+    }
     return 0;
+  }
+
+  private retimeEventsForTrackDistance(events: SpawnEvent[], track: TrackPlan, duration: number): void {
+    const fallbackTravelTime = (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET) / TRACK_SPEED;
+    for (let i = 0; i < events.length; i += 1) {
+      const spawnTime = this.solveSpawnTimeForBeat(events[i].beatTime, track, duration, fallbackTravelTime);
+      if (spawnTime !== null) {
+        events[i].spawnTime = spawnTime;
+      }
+    }
+  }
+
+  private solveSpawnTimeForBeat(beatTime: number, track: TrackPlan, duration: number, fallbackTravelTime: number): number | null {
+    const beatDistance = this.sampleCumulativeDistance(track, beatTime, duration);
+    const targetDistance = beatDistance - (SPAWN_DISTANCE + HIT_LINE_Z_OFFSET);
+    if (targetDistance <= 0) {
+      const fallback = beatTime - fallbackTravelTime;
+      return fallback >= 0 ? fallback : null;
+    }
+    const spawnTime = this.solveTimeForDistance(track, targetDistance, duration);
+    return spawnTime <= beatTime ? spawnTime : beatTime - fallbackTravelTime;
+  }
+
+  private sampleCumulativeDistance(track: TrackPlan, time: number, duration: number): number {
+    const source = track.cumulativeDistance;
+    if (source.length === 0) {
+      return 0;
+    }
+    const normalized = Math.max(0, Math.min(0.999999, time / Math.max(1e-6, duration)));
+    const f = normalized * (source.length - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(source.length - 1, i0 + 1);
+    const t = f - i0;
+    return (source[i0] ?? 0) * (1 - t) + (source[i1] ?? source[i0] ?? 0) * t;
+  }
+
+  private blendLookahead(source: Float32Array, time: number, lookaheadSeconds: number, fallback: number): number {
+    const now = this.sampleTrackValue(source, time, fallback);
+    const ahead = this.sampleTrackValue(source, time + lookaheadSeconds, fallback);
+    return now * 0.62 + ahead * 0.38;
+  }
+
+  private sampleTrackValue(source: Float32Array, time: number, fallback: number): number {
+    if (source.length === 0) {
+      return fallback;
+    }
+    const normalized = Math.max(0, Math.min(0.999999, time / Math.max(1e-6, this.activeSongDuration)));
+    const f = normalized * (source.length - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(source.length - 1, i0 + 1);
+    const t = f - i0;
+    const a = source[i0] ?? fallback;
+    const b = source[i1] ?? a;
+    return a * (1 - t) + b * t;
+  }
+
+  private solveTimeForDistance(track: TrackPlan, distance: number, duration: number): number {
+    const source = track.cumulativeDistance;
+    if (source.length === 0) {
+      return 0;
+    }
+    let lo = 0;
+    let hi = source.length - 1;
+    while (lo + 1 < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((source[mid] ?? 0) <= distance) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    const d0 = source[lo] ?? 0;
+    const d1 = source[hi] ?? d0 + 1;
+    const t = d1 > d0 ? (distance - d0) / (d1 - d0) : 0;
+    return ((lo + t) / Math.max(1, source.length - 1)) * duration;
   }
 
   private generateFallbackGrid(durationSeconds: number): void {

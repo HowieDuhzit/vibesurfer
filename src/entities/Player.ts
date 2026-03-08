@@ -8,6 +8,9 @@ export class Player extends Entity {
   public currentLane = 1;
   public targetLane = 1;
   public readonly position: THREE.Vector3;
+  private readonly forward = new THREE.Vector3(0, 0, -1);
+  private readonly up = new THREE.Vector3(0, 1, 0);
+  private readonly right = new THREE.Vector3(1, 0, 0);
   private logicalLaneX = 0;
   private readonly logicalTrackZ = 0;
   private readonly rideTarget = new THREE.Vector3(0, 0.5, 0);
@@ -29,10 +32,10 @@ export class Player extends Entity {
     const targetX = laneX[this.targetLane] ?? 0;
     this.logicalLaneX += (targetX - this.logicalLaneX) * 0.2;
 
-    this.position.x += (this.rideTarget.x - this.position.x) * 0.32;
-    this.position.y += (this.rideTarget.y - this.position.y) * 0.28;
-    this.position.z += (this.rideTarget.z - this.position.z) * 0.3;
-    this.mesh.quaternion.slerp(this.targetQuaternion, 0.18);
+    this.position.x += (this.rideTarget.x - this.position.x) * 0.42;
+    this.position.y += (this.rideTarget.y - this.position.y) * 0.4;
+    this.position.z += (this.rideTarget.z - this.position.z) * 0.4;
+    this.mesh.quaternion.slerp(this.targetQuaternion, 0.32);
 
     if (Math.abs(this.logicalLaneX - targetX) < 0.001) {
       this.logicalLaneX = targetX;
@@ -60,5 +63,21 @@ export class Player extends Entity {
 
   public getZ(): number {
     return this.logicalTrackZ;
+  }
+
+  public getQuaternion(): Readonly<THREE.Quaternion> {
+    return this.mesh.quaternion;
+  }
+
+  public getForward(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.forward).applyQuaternion(this.mesh.quaternion).normalize();
+  }
+
+  public getUp(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.up).applyQuaternion(this.mesh.quaternion).normalize();
+  }
+
+  public getRight(out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.right).applyQuaternion(this.mesh.quaternion).normalize();
   }
 }

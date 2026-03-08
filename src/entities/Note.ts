@@ -4,12 +4,14 @@ import { Entity } from "./Entity";
 
 const laneX = [-LANE_WIDTH, 0, LANE_WIDTH];
 
-export type NoteType = "tap" | "hold" | "double" | "slide" | "mine";
+export type NoteType = "tap" | "hold" | "double" | "slide" | "mine" | "power";
 
 export class Note extends Entity {
   public lane = 1;
   public slideToLane = 1;
   public zPosition = -SPAWN_DISTANCE;
+  public beatTime = 0;
+  public spawnTime = 0;
   public type: NoteType = "tap";
   public duration = 0;
   public active = false;
@@ -18,19 +20,16 @@ export class Note extends Entity {
     super(new THREE.Object3D());
   }
 
-  public spawn(lane: number, type: NoteType = "tap", duration = 0, slideToLane = lane): void {
+  public spawn(lane: number, type: NoteType = "tap", duration = 0, slideToLane = lane, beatTime = 0, spawnTime = 0): void {
     this.lane = lane;
     this.slideToLane = slideToLane;
     this.zPosition = -SPAWN_DISTANCE;
+    this.beatTime = beatTime;
+    this.spawnTime = spawnTime;
     this.type = type;
     this.duration = duration;
     this.active = true;
     this.mesh.position.set(laneX[lane] ?? 0, 0.55, this.zPosition);
-  }
-
-  public updatePosition(deltaTime: number, speed: number): void {
-    this.zPosition += speed * deltaTime;
-    this.mesh.position.z = this.zPosition;
   }
 
   public deactivate(): void {

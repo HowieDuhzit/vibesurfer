@@ -6,7 +6,7 @@ import { SpawnEvent } from "./BeatMapGenerator";
 interface EventPlannerOptions {
   seed: number;
   difficulty: "chill" | "normal" | "hyper";
-  rideStyle: "flow" | "burst" | "technical";
+  rideStyle: "classic" | "flow" | "burst" | "technical";
   ruleset: "cruise" | "precision" | "assault";
   minGapSeconds: number;
   travelTime: number;
@@ -208,14 +208,14 @@ export class EventPlanner {
     danger: number,
     novelty: number,
     difficulty: "chill" | "normal" | "hyper",
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault",
     profile: SectionProfile,
     anchorBoost: number
   ): number {
     const base = candidate.isBeat ? 0.62 : 0.34;
     const diff = difficulty === "hyper" ? 0.12 : difficulty === "chill" ? -0.12 : 0;
-    const styleBias = rideStyle === "burst" ? 0.1 : rideStyle === "technical" ? 0.03 : -0.03;
+    const styleBias = rideStyle === "burst" ? 0.1 : rideStyle === "technical" ? 0.03 : rideStyle === "classic" ? -0.08 : -0.03;
     const rulesetBias = ruleset === "assault" ? 0.08 : ruleset === "precision" ? -0.04 : 0.02;
     const chance = base + density * 0.35 + danger * 0.2 + novelty * 0.16 + diff + profile.spawnBias + anchorBoost * 0.15 + styleBias + rulesetBias;
     return Math.max(0.06, Math.min(0.95, chance));
@@ -269,7 +269,7 @@ export class EventPlanner {
     density: number,
     feature: number,
     difficulty: "chill" | "normal" | "hyper",
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number
   ): NoteType {
@@ -278,19 +278,23 @@ export class EventPlanner {
     const easy = difficulty === "chill";
     const bursty = rideStyle === "burst";
     const technical = rideStyle === "technical";
+    const classic = rideStyle === "classic";
     const assault = ruleset === "assault";
     const precision = ruleset === "precision";
 
-    if ((hard || technical || assault) && feature > 0.62 && density > 0.55 && strength > 0.9 && r < (assault ? 0.18 : 0.1)) {
+    if (!easy && feature > 0.86 && strength > 0.94 && r < 0.08) {
+      return "power";
+    }
+    if (!classic && (hard || technical || assault) && feature > 0.62 && density > 0.55 && strength > 0.9 && r < (assault ? 0.18 : 0.1)) {
       return "mine";
     }
-    if (!easy && (technical || bursty || precision) && feature > 0.45 && strength > 0.78 && r < (precision ? 0.34 : technical ? 0.28 : 0.2)) {
+    if (!easy && (technical || bursty || precision || classic) && feature > 0.45 && strength > 0.78 && r < (precision ? 0.34 : technical ? 0.28 : classic ? 0.14 : 0.2)) {
       return "slide";
     }
-    if (!easy && density > 0.52 && strength > 0.84 && r < (assault ? 0.26 : bursty ? 0.22 : hard ? 0.17 : 0.1)) {
+    if (!easy && !classic && density > 0.52 && strength > 0.84 && r < (assault ? 0.26 : bursty ? 0.22 : hard ? 0.17 : 0.1)) {
       return "double";
     }
-    if (strength > 0.7 && r < (precision ? 0.18 : rideStyle === "flow" ? 0.3 : hard ? 0.28 : easy ? 0.12 : 0.2)) {
+    if (strength > 0.7 && r < (precision ? 0.18 : rideStyle === "flow" ? 0.3 : classic ? 0.14 : hard ? 0.28 : easy ? 0.12 : 0.2)) {
       return "hold";
     }
     return "tap";
@@ -378,7 +382,7 @@ export class EventPlanner {
     events: SpawnEvent[],
     duration: number,
     difficulty: "chill" | "normal" | "hyper",
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number,
     sectionByFrame: Int8Array,
@@ -394,7 +398,7 @@ export class EventPlanner {
       : 0.5;
     const bpm = 60 / Math.max(0.24, avgBeatSeconds);
     const tempoFactor = Math.max(0.85, Math.min(1.22, bpm / 130));
-    const styleNpsBias = rideStyle === "burst" ? 0.35 : rideStyle === "technical" ? 0.15 : -0.1;
+    const styleNpsBias = rideStyle === "burst" ? 0.35 : rideStyle === "technical" ? 0.15 : rideStyle === "classic" ? -0.2 : -0.1;
     const rulesetBias = ruleset === "assault" ? 0.4 : ruleset === "precision" ? -0.15 : 0;
     const targetNpsBase = (difficulty === "hyper" ? 2.25 : difficulty === "chill" ? 1.2 : 1.9) + styleNpsBias + rulesetBias;
     const targetNps = targetNpsBase * tempoFactor;
@@ -516,7 +520,7 @@ export class EventPlanner {
     events: SpawnEvent[],
     beatSeconds: number,
     difficulty: "chill" | "normal" | "hyper",
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number,
     sectionByFrame: Int8Array,
@@ -578,7 +582,7 @@ export class EventPlanner {
         const idx = bucket[bi];
         const rawLane = spec.lanes[bi % spec.lanes.length];
         let lane = mirror ? (LANES - 1 - rawLane) : rawLane;
-        if (rideStyle === "flow" && ruleset !== "assault" && bi % 3 === 1) {
+        if ((rideStyle === "flow" || rideStyle === "classic") && ruleset !== "assault" && bi % 3 === 1) {
           lane = 1;
         }
         const nextLane = this.stepLaneToward(prevLane, lane, maxStep);
@@ -603,7 +607,7 @@ export class EventPlanner {
     beatSeconds: number,
     travelTime: number,
     timingOffsetSeconds: number,
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault",
     nextRandom: () => number
   ): SpawnEvent[] {
@@ -618,7 +622,7 @@ export class EventPlanner {
       const frame = this.clampFrame(anchorFrames[i], song.frames.length);
       const anchorTime = song.frames[frame]?.time ?? 0;
       const nearby = out.filter((event) => Math.abs(event.beatTime - anchorTime) <= windowRadius);
-      if (nearby.length >= (ruleset === "assault" ? 5 : rideStyle === "burst" ? 4 : 3)) {
+      if (nearby.length >= (ruleset === "assault" ? 5 : rideStyle === "burst" ? 4 : rideStyle === "classic" ? 2 : 3)) {
         continue;
       }
 
@@ -626,6 +630,8 @@ export class EventPlanner {
         ? (nextRandom() < 0.5 ? 0 : 2)
         : rideStyle === "burst"
           ? (nextRandom() < 0.5 ? 0 : 2)
+          : rideStyle === "classic"
+            ? 1
           : 1;
       const phrase = this.anchorPattern(baseLane, rideStyle, ruleset);
       const offsetStep = beatSeconds * 0.5;
@@ -642,8 +648,16 @@ export class EventPlanner {
           beatTime: beatTime + timingOffsetSeconds,
           lane,
           bassEnergy: 120,
-          type: rideStyle === "flow" && ruleset !== "precision" && p === Math.floor(phrase.length / 2) ? "hold" : "tap",
-          duration: rideStyle === "flow" && ruleset !== "precision" && p === Math.floor(phrase.length / 2) ? Math.max(0.26, beatSeconds * 0.75) : 0,
+          type: p === Math.floor(phrase.length / 2)
+            ? "power"
+            : (rideStyle === "flow" || rideStyle === "classic") && ruleset !== "precision"
+              ? "hold"
+              : "tap",
+          duration: p === Math.floor(phrase.length / 2)
+            ? 0
+            : (rideStyle === "flow" || rideStyle === "classic") && ruleset !== "precision"
+              ? Math.max(0.26, beatSeconds * 0.75)
+              : 0,
           slideToLane: lane
         });
       }
@@ -658,7 +672,7 @@ export class EventPlanner {
     beatSeconds: number,
     minGapSeconds: number,
     difficulty: "chill" | "normal" | "hyper",
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault"
   ): SpawnEvent[] {
     if (events.length <= 2) {
@@ -668,6 +682,8 @@ export class EventPlanner {
     const out: SpawnEvent[] = [];
     const switchTime = rideStyle === "technical"
       ? 0.16
+      : rideStyle === "classic"
+        ? 0.26
       : difficulty === "hyper"
         ? 0.17
         : difficulty === "chill"
@@ -806,7 +822,7 @@ export class EventPlanner {
 
   private anchorPattern(
     baseLane: number,
-    rideStyle: "flow" | "burst" | "technical",
+    rideStyle: "classic" | "flow" | "burst" | "technical",
     ruleset: "cruise" | "precision" | "assault"
   ): readonly number[] {
     if (ruleset === "assault") {
@@ -820,6 +836,9 @@ export class EventPlanner {
     }
     if (rideStyle === "technical") {
       return baseLane === 0 ? [0, 1, 0, 2] : [2, 1, 2, 0];
+    }
+    if (rideStyle === "classic") {
+      return baseLane === 1 ? [1, 0, 1, 2, 1] : [1, baseLane, 1];
     }
     return [1, baseLane, 1];
   }

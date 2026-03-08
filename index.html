@@ -220,7 +220,8 @@
               </label>
               <label>Ride Style
                 <select id="ride-style">
-                  <option value="flow" selected>Flow</option>
+                  <option value="classic" selected>Classic</option>
+                  <option value="flow">Flow</option>
                   <option value="burst">Burst</option>
                   <option value="technical">Technical</option>
                 </select>
@@ -241,6 +242,7 @@
               </label>
               <label>Strict <input id="strict-mode" type="checkbox" /></label>
               <label>Mirror <input id="mirror-lanes" type="checkbox" /></label>
+              <label>Autopilot <input id="autopilot-mode" type="checkbox" /></label>
             </div>
             <div class="row">
               <label>Seed <input id="seed-input" type="number" value="123456789" style="width: 130px" /></label>
@@ -317,6 +319,7 @@
       <span id="score">Score: 0</span>
       <span id="combo">Combo: 0</span>
       <span id="accuracy">Acc: 0.0%</span>
+      <span id="surge">Surge: 0%</span>
     </div>
 
     <div id="judgment"></div>
@@ -331,6 +334,7 @@
       <span id="result-max-combo">Max Combo: 0</span>
       <span id="result-breakdown">P:0 G:0 g:0 M:0</span>
       <span id="result-types">Tap:0 Hold:0 Slide:0 Double:0 Mines:0</span>
+      <span id="result-power">Power:0 End Bonus:0</span>
       <span id="result-tech">Hold C/B:0/0 Slide C/B:0/0</span>
       <button id="result-menu-btn">Back To Menu</button>
     </div>

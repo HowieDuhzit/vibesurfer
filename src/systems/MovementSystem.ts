@@ -1,5 +1,5 @@
-import * as THREE from "three";
 import { TRACK_SPEED } from "../core/Config";
+import * as THREE from "three";
 import { Player } from "../entities/Player";
 import { Track } from "../world/Track";
 import { NoteSpawner } from "../world/NoteSpawner";

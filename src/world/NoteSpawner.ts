@@ -24,7 +24,8 @@ export class NoteSpawner {
     hold: new THREE.Color(0x34d399),
     double: new THREE.Color(0xc084fc),
     slide: new THREE.Color(0xf59e0b),
-    mine: new THREE.Color(0xf43f5e)
+    mine: new THREE.Color(0xf43f5e),
+    power: new THREE.Color(0xf8fafc)
   };
   private readonly tempColor = new THREE.Color();
   private readonly mixedColor = new THREE.Color();
@@ -74,7 +75,7 @@ export class NoteSpawner {
         continue;
       }
 
-      note.spawn(spawn.lane, spawn.type, spawn.duration, spawn.slideToLane);
+      note.spawn(spawn.lane, spawn.type, spawn.duration, spawn.slideToLane, spawn.beatTime, spawn.spawnTime);
       note.zPosition = -SPAWN_DISTANCE;
       this.writeMatrix(note);
       const laneColor = this.laneColors[spawn.lane] ?? this.laneColors[1];
@@ -93,7 +94,7 @@ export class NoteSpawner {
   public updateActiveNotes(deltaTime: number, trackSpeed: number): void {
     for (let i = this.activeIndices.length - 1; i >= 0; i -= 1) {
       const note = this.notes[this.activeIndices[i]];
-      note.updatePosition(deltaTime, trackSpeed);
+      note.zPosition += trackSpeed * deltaTime;
       this.writeMatrix(note);
     }
 
@@ -181,11 +182,55 @@ export class NoteSpawner {
       this.matrixDummy.rotateY(note.zPosition * 0.08);
       this.matrixDummy.rotateZ(0.8);
       this.matrixDummy.scale.set(0.78, 0.78, 0.78);
+    } else if (note.type === "power") {
+      const pulse = 1 + Math.sin(note.zPosition * 0.08) * 0.12;
+      this.matrixDummy.scale.set(1.32 * pulse, 1.32 * pulse, 1.32 * pulse);
     } else {
       this.matrixDummy.scale.set(1, 1, 1);
     }
     this.matrixDummy.updateMatrix();
     this.instancedMesh.setMatrixAt(note.instanceId, this.matrixDummy.matrix);
+  }
+
+  public getGuidanceTarget(playerHitZ: number, currentLane: number): number | null {
+    let bestCollectible: Note | null = null;
+    let bestCollectibleDistance = Infinity;
+    let imminentMineLane = -1;
+    let imminentMineDistance = Infinity;
+
+    for (let i = 0; i < this.activeIndices.length; i += 1) {
+      const note = this.notes[this.activeIndices[i]];
+      const distance = note.zPosition - playerHitZ;
+      if (distance < -0.3 || distance > 18) {
+        continue;
+      }
+
+      if (note.type === "mine") {
+        if (distance < imminentMineDistance) {
+          imminentMineDistance = distance;
+          imminentMineLane = note.lane;
+        }
+        continue;
+      }
+
+      if (distance < bestCollectibleDistance) {
+        bestCollectibleDistance = distance;
+        bestCollectible = note;
+      }
+    }
+
+    if (bestCollectible && bestCollectibleDistance < 8) {
+      return bestCollectible.lane;
+    }
+
+    if (imminentMineLane === currentLane && imminentMineDistance < 4) {
+      if (currentLane === 1) {
+        return 0;
+      }
+      return 1;
+    }
+
+    return null;
   }
 
 }

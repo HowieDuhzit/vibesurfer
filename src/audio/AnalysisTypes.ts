@@ -50,6 +50,8 @@ export interface TrackPlan {
   elevation: Float32Array;
   curvature: Float32Array;
   pace: Float32Array;
+  speedScale: Float32Array;
+  cumulativeDistance: Float32Array;
   eventDensity: Float32Array;
   dangerLevel: Float32Array;
   featureEligibility: Float32Array;

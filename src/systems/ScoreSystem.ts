@@ -1,13 +1,16 @@
 import { NoteType } from "../entities/Note";
 import { HitJudgment } from "./CollisionSystem";
 
-type RideStyle = "flow" | "burst" | "technical";
+type RideStyle = "classic" | "flow" | "burst" | "technical";
 type RulesetMode = "cruise" | "precision" | "assault";
 
 export class ScoreSystem {
-  private rideStyle: RideStyle = "flow";
+  private rideStyle: RideStyle = "classic";
   private ruleset: RulesetMode = "cruise";
   public score = 0;
+  public endBonus = 0;
+  public powerHits = 0;
+  public surgeTime = 0;
   public combo = 0;
   public maxCombo = 0;
   public totalNotes = 0;
@@ -48,24 +51,30 @@ export class ScoreSystem {
       this.slideHits += 1;
     } else if (noteType === "double") {
       this.doubleHits += 1;
+    } else if (noteType === "power") {
+      this.powerHits += 1;
+      this.surgeTime = Math.min(8, this.surgeTime + 3.5);
     } else {
       this.tapHits += 1;
     }
 
-    const comboMultiplier = this.rideStyle === "flow"
+    const comboMultiplier = this.rideStyle === "classic"
+      ? 1 + this.combo * 0.105
+      : this.rideStyle === "flow"
       ? 1 + this.combo * 0.115
       : this.rideStyle === "burst"
         ? 1 + this.combo * 0.09
         : 1 + this.combo * 0.1;
     const base = judgment === "perfect" ? 130 : judgment === "great" ? 100 : 70;
     const noteTypeMult = this.getNoteTypeMultiplier(noteType);
-    const expressiveBonus = expressiveHit ? (this.rideStyle === "technical" ? 55 : 35) : 0;
+    const expressiveBonus = expressiveHit ? (this.rideStyle === "technical" ? 55 : this.rideStyle === "classic" ? 28 : 35) : 0;
     const rulesetBonus = this.ruleset === "precision"
       ? judgment === "perfect" ? 30 : 10
       : this.ruleset === "assault"
         ? noteType === "double" || noteType === "slide" ? 26 : 8
         : noteType === "hold" ? 18 : 0;
-    this.score += base * comboMultiplier * noteTypeMult + expressiveBonus + rulesetBonus;
+    const surgeMultiplier = this.surgeTime > 0 ? 1.32 : 1;
+    this.score += (base * comboMultiplier * noteTypeMult + expressiveBonus + rulesetBonus) * surgeMultiplier;
   }
 
   public onNoteMissed(): void {
@@ -78,7 +87,7 @@ export class ScoreSystem {
   public onMineHit(): void {
     this.combo = 0;
     this.mineHits += 1;
-    const penaltyBase = this.rideStyle === "technical" ? 280 : this.rideStyle === "burst" ? 180 : 220;
+    const penaltyBase = this.rideStyle === "technical" ? 280 : this.rideStyle === "burst" ? 180 : this.rideStyle === "classic" ? 200 : 220;
     const penalty = this.ruleset === "assault" ? Math.round(penaltyBase * 0.85) : this.ruleset === "precision" ? Math.round(penaltyBase * 1.15) : penaltyBase;
     this.score = Math.max(0, this.score - penalty);
     this.lastJudgment = "miss";
@@ -86,7 +95,7 @@ export class ScoreSystem {
 
   public onHoldCompleted(): void {
     this.holdCompleted += 1;
-    const bonus = this.rideStyle === "flow" ? 130 : this.rideStyle === "technical" ? 95 : 80;
+    const bonus = this.rideStyle === "flow" ? 130 : this.rideStyle === "technical" ? 95 : this.rideStyle === "classic" ? 118 : 80;
     this.score += bonus + this.combo * 2.2;
   }
 
@@ -100,7 +109,7 @@ export class ScoreSystem {
 
   public onSlideCompleted(): void {
     this.slideCompleted += 1;
-    const bonus = this.rideStyle === "technical" ? 145 : this.rideStyle === "burst" ? 120 : 105;
+    const bonus = this.rideStyle === "technical" ? 145 : this.rideStyle === "burst" ? 120 : this.rideStyle === "classic" ? 110 : 105;
     this.score += bonus + this.combo * 2.6;
   }
 
@@ -131,6 +140,9 @@ export class ScoreSystem {
 
   public reset(): void {
     this.score = 0;
+    this.endBonus = 0;
+    this.powerHits = 0;
+    this.surgeTime = 0;
     this.combo = 0;
     this.maxCombo = 0;
     this.totalNotes = 0;
@@ -151,8 +163,27 @@ export class ScoreSystem {
     this.lastJudgment = null;
   }
 
-  public update(): void {
-    // Reserved for future score-side effects.
+  public update(deltaTime: number): void {
+    this.surgeTime = Math.max(0, this.surgeTime - deltaTime);
+  }
+
+  public applyEndRunBonus(accuracy: number, mineHits: number, autopilotEnabled: boolean): number {
+    let bonus = 0;
+    if (mineHits === 0) {
+      bonus += this.ruleset === "precision" ? 2200 : 1400;
+    }
+    if (accuracy >= 0.9) {
+      bonus += this.ruleset === "precision" ? 1800 : 900;
+    }
+    if (!autopilotEnabled && this.powerHits >= 3) {
+      bonus += 750;
+    }
+    if (autopilotEnabled) {
+      bonus = Math.round(bonus * 0.35);
+    }
+    this.endBonus += bonus;
+    this.score += bonus;
+    return bonus;
   }
 
   private getNoteTypeMultiplier(noteType: NoteType): number {
@@ -176,10 +207,29 @@ export class ScoreSystem {
       if (noteType === "mine") {
         return 0.9;
       }
+      if (noteType === "power") {
+        return 1.9;
+      }
       if (noteType === "slide") {
         return 1.3;
       }
       return 1.12;
+    }
+
+    if (this.rideStyle === "classic") {
+      if (noteType === "hold") {
+        return 1.42;
+      }
+      if (noteType === "slide") {
+        return 1.18;
+      }
+      if (noteType === "power") {
+        return 1.62;
+      }
+      if (noteType === "double") {
+        return 1.16;
+      }
+      return 1;
     }
 
     if (this.rideStyle === "flow") {
@@ -210,6 +260,9 @@ export class ScoreSystem {
 
     if (noteType === "slide") {
       return 1.42;
+    }
+    if (noteType === "power") {
+      return 1.85;
     }
     if (noteType === "hold") {
       return 1.22;

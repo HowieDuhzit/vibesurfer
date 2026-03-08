@@ -28,7 +28,7 @@ import { Time } from "./Time";
 export type DifficultyMode = "chill" | "normal" | "hyper";
 export type QualityMode = "auto" | "high" | "medium" | "low";
 export type GameMode = "chart" | "endless" | "practice";
-export type RideStyle = "flow" | "burst" | "technical";
+export type RideStyle = "classic" | "flow" | "burst" | "technical";
 export type { RulesetMode };
 
 export class Game {
@@ -64,7 +64,7 @@ export class Game {
   private readonly pendingSpawnEvents: SpawnEvent[] = [];
 
   private difficulty: DifficultyMode = "normal";
-  private rideStyle: RideStyle = "flow";
+  private rideStyle: RideStyle = "classic";
   private ruleset: RulesetMode = "cruise";
   private timingOffsetMs = 0;
   private sectionEnergy = 0;
@@ -84,6 +84,7 @@ export class Game {
   private gameMode: GameMode = "chart";
   private strictMode = false;
   private mirrorLanes = false;
+  private autopilot = false;
   private practiceSpeed = 0.85;
   private loopStart = 0;
   private loopEnd = 0;
@@ -95,6 +96,7 @@ export class Game {
   private frameCostAvg = 1 / 60;
   private qualityAdaptClock = 0;
   private hoverBobTime = 0;
+  private resultFinalized = false;
 
   public constructor(private readonly mount: HTMLElement) {
     this.renderer = new Renderer(this.mount);
@@ -156,7 +158,7 @@ export class Game {
     this.setEffectIntensity(1);
     this.setLaneTolerance(0.55);
     this.setDifficulty("normal");
-    this.setRideStyle("flow");
+    this.setRideStyle("classic");
     this.setRuleset("cruise");
     this.setGameMode("chart");
 
@@ -174,6 +176,7 @@ export class Game {
 
   public async loadAudioFile(file: File): Promise<void> {
     this.songFinished = false;
+    this.resultFinalized = false;
     this.judgmentLabel = "";
     this.judgmentTimer = 0;
     this.beatMapGenerator.clear();
@@ -188,6 +191,7 @@ export class Game {
 
   public async playAudio(): Promise<void> {
     this.songFinished = false;
+    this.resultFinalized = false;
     await this.audioManager.play();
     if (this.metronomeEnabled) {
       const now = this.audioManager.isPlaying() ? this.audioManager.getCurrentTime() : 0;
@@ -225,6 +229,14 @@ export class Game {
 
   public getMirrorLanes(): boolean {
     return this.mirrorLanes;
+  }
+
+  public setAutopilot(enabled: boolean): void {
+    this.autopilot = enabled;
+  }
+
+  public getAutopilot(): boolean {
+    return this.autopilot;
   }
 
   public setMetronomeEnabled(enabled: boolean): void {
@@ -361,6 +373,7 @@ export class Game {
     slides: number;
     doubles: number;
     mines: number;
+    power: number;
     lane0: number;
     lane1: number;
     lane2: number;
@@ -372,6 +385,7 @@ export class Game {
     let slides = 0;
     let doubles = 0;
     let mines = 0;
+    let power = 0;
     let lane0 = 0;
     let lane1 = 0;
     let lane2 = 0;
@@ -386,6 +400,8 @@ export class Game {
         doubles += 1;
       } else if (note.type === "mine") {
         mines += 1;
+      } else if (note.type === "power") {
+        power += 1;
       } else {
         taps += 1;
       }
@@ -407,6 +423,7 @@ export class Game {
       slides,
       doubles,
       mines,
+      power,
       lane0,
       lane1,
       lane2,
@@ -428,6 +445,7 @@ export class Game {
     good: number;
     miss: number;
     fever: number;
+    surge: number;
     judgment: string;
     judgmentVisible: boolean;
   }> {
@@ -442,6 +460,7 @@ export class Game {
       good: this.scoreSystem.good,
       miss: this.scoreSystem.misses,
       fever,
+      surge: Math.max(0, Math.min(1, this.scoreSystem.surgeTime / 6)),
       judgment: this.judgmentLabel,
       judgmentVisible: this.judgmentTimer > 0
     };
@@ -468,6 +487,9 @@ export class Game {
     slideCompleted: number;
     slideBroken: number;
     totalNotes: number;
+    powerHits: number;
+    endBonus: number;
+    autopilot: boolean;
   }> {
     return {
       complete: this.songFinished,
@@ -489,7 +511,10 @@ export class Game {
       holdBroken: this.scoreSystem.holdBroken,
       slideCompleted: this.scoreSystem.slideCompleted,
       slideBroken: this.scoreSystem.slideBroken,
-      totalNotes: this.scoreSystem.totalNotes
+      totalNotes: this.scoreSystem.totalNotes,
+      powerHits: this.scoreSystem.powerHits,
+      endBonus: this.scoreSystem.endBonus,
+      autopilot: this.autopilot
     };
   }
 
@@ -611,13 +636,18 @@ export class Game {
     }
 
     this.input.update();
+    const isPlaying = this.audioManager.isPlaying();
     let lane = this.input.getTargetLane();
+    if (this.autopilot && isPlaying) {
+      const guidedLane = this.spawner.getGuidanceTarget(this.player.getZ() + 0.35, lane);
+      if (guidedLane !== null) {
+        lane = guidedLane;
+      }
+    }
     if (this.mirrorLanes) {
       lane = 2 - lane;
     }
     this.player.setTargetLane(lane);
-
-    const isPlaying = this.audioManager.isPlaying();
 
     if (isPlaying) {
       this.audioAnalyzer.update();
@@ -660,7 +690,7 @@ export class Game {
       this.movementSystem.update(time.deltaTime);
       this.collisionSystem.update(time.deltaTime);
 
-      this.scoreSystem.update();
+      this.scoreSystem.update(time.deltaTime);
       this.beatPulseEffect.update(time.deltaTime);
       this.particleSystem.update(time.deltaTime);
 
@@ -682,7 +712,13 @@ export class Game {
       this.track.setPlaybackTime(0);
       this.cameraController.setTrackMotion(0, 0, 0);
       this.movementSystem.update(time.deltaTime);
+      this.scoreSystem.update(time.deltaTime);
       this.particleSystem.update(time.deltaTime);
+    }
+
+    if (this.songFinished && !this.resultFinalized) {
+      this.resultFinalized = true;
+      this.scoreSystem.applyEndRunBonus(this.scoreSystem.getAccuracy(), this.scoreSystem.mineHits, this.autopilot);
     }
 
     this.cameraShake += (0 - this.cameraShake) * Math.min(1, time.deltaTime * 8);

@@ -47,6 +47,7 @@ const rulesetSelect = byId<HTMLSelectElement>("ruleset-mode");
 const difficultySelect = byId<HTMLSelectElement>("difficulty");
 const strictModeInput = byId<HTMLInputElement>("strict-mode");
 const mirrorLanesInput = byId<HTMLInputElement>("mirror-lanes");
+const autopilotInput = byId<HTMLInputElement>("autopilot-mode");
 const seedInput = byId<HTMLInputElement>("seed-input");
 const applySeedButton = byId<HTMLButtonElement>("apply-seed");
 const chartSummaryLabel = byId<HTMLDivElement>("chart-summary");
@@ -75,6 +76,7 @@ const touchZonesToggle = byId<HTMLInputElement>("touch-zones-toggle");
 const scoreLabel = byId<HTMLSpanElement>("score");
 const comboLabel = byId<HTMLSpanElement>("combo");
 const accuracyLabel = byId<HTMLSpanElement>("accuracy");
+const surgeLabel = byId<HTMLSpanElement>("surge");
 const profileSummaryLabel = byId<HTMLDivElement>("profile-summary");
 const missionSummaryLabel = byId<HTMLDivElement>("mission-summary");
 const sessionSummaryLabel = byId<HTMLDivElement>("session-summary");
@@ -91,6 +93,7 @@ const resultAccuracy = byId<HTMLSpanElement>("result-accuracy");
 const resultMaxCombo = byId<HTMLSpanElement>("result-max-combo");
 const resultBreakdown = byId<HTMLSpanElement>("result-breakdown");
 const resultTypes = byId<HTMLSpanElement>("result-types");
+const resultPower = byId<HTMLSpanElement>("result-power");
 const resultTech = byId<HTMLSpanElement>("result-tech");
 const resultMenuBtn = byId<HTMLButtonElement>("result-menu-btn");
 
@@ -113,6 +116,7 @@ const MIRROR_KEY = "vibesurfer_mirror";
 const STRICT_KEY = "vibesurfer_strict";
 const RIDE_STYLE_KEY = "vibesurfer_ride_style";
 const RULESET_KEY = "vibesurfer_ruleset";
+const AUTOPILOT_KEY = "vibesurfer_autopilot";
 
 let personalBest = Number(localStorage.getItem(PB_KEY) || "0");
 let previousResultComplete = false;
@@ -238,11 +242,15 @@ const savedMirror = localStorage.getItem(MIRROR_KEY) === "1";
 mirrorLanesInput.checked = savedMirror;
 game.setMirrorLanes(savedMirror);
 
+const savedAutopilot = localStorage.getItem(AUTOPILOT_KEY) === "1";
+autopilotInput.checked = savedAutopilot;
+game.setAutopilot(savedAutopilot);
+
 const savedStrict = localStorage.getItem(STRICT_KEY) === "1";
 strictModeInput.checked = savedStrict;
 game.setStrictMode(savedStrict);
 
-const savedRideStyle = (localStorage.getItem(RIDE_STYLE_KEY) as RideStyle | null) ?? "flow";
+const savedRideStyle = (localStorage.getItem(RIDE_STYLE_KEY) as RideStyle | null) ?? "classic";
 rideStyleSelect.value = savedRideStyle;
 game.setRideStyle(savedRideStyle);
 const savedRuleset = (localStorage.getItem(RULESET_KEY) as RulesetMode | null) ?? "cruise";
@@ -290,12 +298,13 @@ const updateHud = (): void => {
   scoreLabel.textContent = `Score: ${state.score}`;
   comboLabel.textContent = `Combo: ${state.combo}`;
   accuracyLabel.textContent = `Acc: ${(state.accuracy * 100).toFixed(1)}%`;
+  surgeLabel.textContent = `Surge: ${(state.surge * 100).toFixed(0)}%`;
 
   judgmentLabel.textContent = state.judgment;
   judgmentLabel.classList.toggle("show", state.judgmentVisible);
 
   const chart = game.getChartPreviewSummary();
-  chartSummaryLabel.textContent = `Chart ${game.getRuleset()}/${game.getRideStyle()} N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}`;
+  chartSummaryLabel.textContent = `Chart ${game.getRuleset()}/${game.getRideStyle()} N:${chart.total} NPS:${chart.nps.toFixed(2)} L:${chart.lane0}/${chart.lane1}/${chart.lane2} T/H/S/D/M/P:${chart.taps}/${chart.holds}/${chart.slides}/${chart.doubles}/${chart.mines}/${chart.power}`;
   drawAnalysisDebug();
 
   const debug = game.getDebugState();
@@ -319,6 +328,7 @@ const updateHud = (): void => {
   resultMaxCombo.textContent = `Max Combo: ${result.maxCombo}`;
   resultBreakdown.textContent = `P:${result.perfect} G:${result.great} g:${result.good} M:${result.miss} Notes:${result.totalNotes}`;
   resultTypes.textContent = `Tap:${result.tapHits} Hold:${result.holdHits} Slide:${result.slideHits} Double:${result.doubleHits} Mines:${result.mineHits}`;
+  resultPower.textContent = `Power:${result.powerHits} End Bonus:${result.endBonus} ${result.autopilot ? "Auto" : "Manual"}`;
   resultTech.textContent = `Hold C/B:${result.holdCompleted}/${result.holdBroken} Slide C/B:${result.slideCompleted}/${result.slideBroken}`;
 
   if (result.complete && !previousResultComplete) {
@@ -417,6 +427,11 @@ strictModeInput.addEventListener("change", () => {
 mirrorLanesInput.addEventListener("change", () => {
   game.setMirrorLanes(mirrorLanesInput.checked);
   localStorage.setItem(MIRROR_KEY, mirrorLanesInput.checked ? "1" : "0");
+});
+
+autopilotInput.addEventListener("change", () => {
+  game.setAutopilot(autopilotInput.checked);
+  localStorage.setItem(AUTOPILOT_KEY, autopilotInput.checked ? "1" : "0");
 });
 
 timingOffsetInput.addEventListener("input", () => {
