@@ -88,9 +88,9 @@
         left: 12px;
         z-index: 10;
         display: flex;
-        gap: 12px;
+        gap: 10px;
         align-items: center;
-        padding: 10px 12px;
+        padding: 8px 10px;
         border: 1px solid #334155;
         border-radius: 8px;
         background: rgba(2, 6, 23, 0.7);
@@ -181,6 +181,10 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         font-size: 12px;
         opacity: 0.9;
+      }
+
+      .quiet {
+        opacity: 0.72;
       }
     </style>
   </head>
@@ -308,7 +312,7 @@
             <div id="mission-summary" class="mono">Missions: -</div>
             <div id="session-summary" class="mono">Session: -</div>
             <div id="goal-summary" class="mono">Goal: -</div>
-            <div id="debug" class="mono">Playing: false Pending: 0 Active: 0 Progress: 0%</div>
+            <div id="debug" class="mono quiet">Run State: idle</div>
           </div>
         </section>
       </div>

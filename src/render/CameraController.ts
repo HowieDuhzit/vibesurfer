@@ -11,6 +11,7 @@ export class CameraController {
   private readonly right = new THREE.Vector3();
   private readonly blendedUp = new THREE.Vector3();
   private readonly worldUp = new THREE.Vector3(0, 1, 0);
+  private lookAhead = 0;
   private baseFov: number;
   private fovPulseEnabled = true;
   private noiseTime = 0;
@@ -45,6 +46,7 @@ export class CameraController {
     this.trackBank += (this.targetTrackBank - this.trackBank) * smoothing;
     this.trackLift += (this.targetTrackLift - this.trackLift) * smoothing;
     this.trackPace += (this.targetTrackPace - this.trackPace) * smoothing;
+    this.lookAhead += ((0.9 + this.trackPace * 1.6) - this.lookAhead) * smoothing;
 
     this.player.getForward(this.forward);
     this.player.getUp(this.up);
@@ -52,7 +54,7 @@ export class CameraController {
     this.blendedUp.copy(this.worldUp).lerp(this.up, 0.58).normalize();
 
     const followDistance = this.baseOffset.z - this.trackPace * 1.1;
-    const height = this.baseOffset.y + this.trackLift * 0.95;
+    const height = this.baseOffset.y + this.trackLift * 0.78;
     const lateral = this.trackBank * 0.7;
 
     this.targetPosition.copy(this.player.position)
@@ -65,7 +67,7 @@ export class CameraController {
     this.camera.fov = this.baseFov + pulse * 2.2 + this.trackPace * 2.4;
     this.camera.updateProjectionMatrix();
     this.lookAtTarget.copy(this.player.position)
-      .addScaledVector(this.forward, 10.5 + this.trackPace * 3.1)
+      .addScaledVector(this.forward, 9.5 + this.trackPace * 2.5 + this.lookAhead)
       .addScaledVector(this.blendedUp, 0.45 + this.trackLift * 0.42)
       .addScaledVector(this.right, this.trackBank * 0.24);
     this.camera.up.lerp(this.blendedUp, Math.min(1, deltaTime * 5 || 1));

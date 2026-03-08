@@ -534,6 +534,20 @@ export class EventPlanner {
     const measureSeconds = beatSeconds * 4;
     const windows = Math.max(1, Math.ceil(duration / Math.max(0.8, measureSeconds)));
     const introPattern: PatternSpec = { lanes: [1, 1, 0, 1, 2, 1] };
+    const classicVersePatterns: PatternSpec[] = [
+      { lanes: [1, 0, 1, 1, 2, 1] },
+      { lanes: [1, 1, 0, 1, 1, 2] },
+      { lanes: [1, 0, 1, 2, 1] }
+    ];
+    const classicChorusPatterns: PatternSpec[] = [
+      { lanes: [1, 0, 1, 2, 1, 0, 1, 2] },
+      { lanes: [0, 1, 2, 1, 0, 1, 2, 1] },
+      { lanes: [1, 2, 1, 0, 1, 2, 1, 0] }
+    ];
+    const classicBreakdownPatterns: PatternSpec[] = [
+      { lanes: [1, 1, 0, 1, 1] },
+      { lanes: [1, 2, 1, 1, 0] }
+    ];
     const versePatterns: PatternSpec[] = [
       { lanes: [1, 0, 1, 2, 1] },
       { lanes: [0, 1, 2, 1] },
@@ -566,7 +580,13 @@ export class EventPlanner {
       const midT = t0 + measureSeconds * 0.5;
       const section = this.resolveSectionForTime(midT, sectionByFrame, duration);
       let spec: PatternSpec;
-      if (section === 0 || section === 4) {
+      if (rideStyle === "classic" && section === 2) {
+        spec = classicChorusPatterns[Math.floor(nextRandom() * classicChorusPatterns.length)];
+      } else if (rideStyle === "classic" && section === 3) {
+        spec = classicBreakdownPatterns[Math.floor(nextRandom() * classicBreakdownPatterns.length)];
+      } else if (rideStyle === "classic" && section === 1) {
+        spec = classicVersePatterns[Math.floor(nextRandom() * classicVersePatterns.length)];
+      } else if (section === 0 || section === 4) {
         spec = introPattern;
       } else if (section === 2) {
         spec = chorusPatterns[Math.floor(nextRandom() * chorusPatterns.length)];
@@ -576,7 +596,11 @@ export class EventPlanner {
         spec = versePatterns[Math.floor(nextRandom() * versePatterns.length)];
       }
 
-      const mirror = difficulty === "hyper" || ruleset === "precision" ? nextRandom() < 0.5 : nextRandom() < 0.35;
+      const mirror = rideStyle === "classic"
+        ? nextRandom() < 0.18
+        : difficulty === "hyper" || ruleset === "precision"
+          ? nextRandom() < 0.5
+          : nextRandom() < 0.35;
       const maxStep = difficulty === "hyper" || rideStyle === "technical" || ruleset === "precision" ? 2 : 1;
       for (let bi = 0; bi < bucket.length; bi += 1) {
         const idx = bucket[bi];
@@ -584,6 +608,9 @@ export class EventPlanner {
         let lane = mirror ? (LANES - 1 - rawLane) : rawLane;
         if ((rideStyle === "flow" || rideStyle === "classic") && ruleset !== "assault" && bi % 3 === 1) {
           lane = 1;
+        }
+        if (rideStyle === "classic" && section === 2 && bi % 4 === 0) {
+          lane = bi % 8 < 4 ? 0 : 2;
         }
         const nextLane = this.stepLaneToward(prevLane, lane, maxStep);
         out[idx].lane = nextLane;
@@ -838,7 +865,7 @@ export class EventPlanner {
       return baseLane === 0 ? [0, 1, 0, 2] : [2, 1, 2, 0];
     }
     if (rideStyle === "classic") {
-      return baseLane === 1 ? [1, 0, 1, 2, 1] : [1, baseLane, 1];
+      return baseLane === 1 ? [1, 0, 1, 2, 1, 0, 1] : [1, baseLane, 1, baseLane, 1];
     }
     return [1, baseLane, 1];
   }

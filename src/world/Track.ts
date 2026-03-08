@@ -7,10 +7,12 @@ interface RibbonSurface {
   mesh: THREE.Mesh;
   geometry: THREE.BufferGeometry;
   positions: Float32Array;
+  positionAttr: THREE.BufferAttribute;
   width: number;
   centerOffset: number;
   yOffset: number;
   widthSegments: number;
+  dynamicNormals: boolean;
 }
 
 interface FrameSample {
@@ -69,6 +71,7 @@ export class Track {
   private riderHeight = 0;
   private riderBank = 0;
   private riderPitch = 0;
+  private frameCounter = 0;
 
   public constructor() {
     this.roadMaterial = new THREE.MeshPhysicalMaterial({
@@ -102,12 +105,12 @@ export class Track {
       opacity: 0.78
     });
 
-    this.surfaces.push(this.createRibbonSurface(this.trackWidth, 0, 0, 10, this.roadMaterial));
+    this.surfaces.push(this.createRibbonSurface(this.trackWidth, 0, 0, 10, this.roadMaterial, true));
 
     const shoulderWidth = 1.65;
     const shoulderOffset = this.trackWidth * 0.5 + shoulderWidth * 0.5;
-    this.surfaces.push(this.createRibbonSurface(shoulderWidth, shoulderOffset, 0.02, 2, this.sideMaterial));
-    this.surfaces.push(this.createRibbonSurface(shoulderWidth, -shoulderOffset, 0.02, 2, this.sideMaterial));
+    this.surfaces.push(this.createRibbonSurface(shoulderWidth, shoulderOffset, 0.02, 2, this.sideMaterial, true));
+    this.surfaces.push(this.createRibbonSurface(shoulderWidth, -shoulderOffset, 0.02, 2, this.sideMaterial, true));
 
     for (let lane = 0; lane <= LANES; lane += 1) {
       const offset = (lane - LANES / 2) * LANE_WIDTH;
@@ -134,6 +137,7 @@ export class Track {
   }
 
   public update(_deltaTime: number): void {
+    this.frameCounter += 1;
     this.updateVisibleTrack();
   }
 
@@ -217,8 +221,10 @@ export class Track {
         }
       }
 
-      surface.geometry.attributes.position.needsUpdate = true;
-      surface.geometry.computeVertexNormals();
+      surface.positionAttr.needsUpdate = true;
+      if (surface.dynamicNormals && (this.frameCounter & 1) === 0) {
+        surface.geometry.computeVertexNormals();
+      }
     }
   }
 
@@ -346,7 +352,8 @@ export class Track {
     centerOffset: number,
     yOffset: number,
     widthSegments: number,
-    material: THREE.Material
+    material: THREE.Material,
+    dynamicNormals = false
   ): RibbonSurface {
     const verticesAcross = Math.max(1, widthSegments) + 1;
     const verticesLong = this.lengthSegments + 1;
@@ -364,7 +371,9 @@ export class Track {
     }
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const positionAttr = new THREE.BufferAttribute(positions, 3);
+    positionAttr.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute("position", positionAttr);
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
 
@@ -378,10 +387,12 @@ export class Track {
       mesh,
       geometry,
       positions,
+      positionAttr,
       width,
       centerOffset,
       yOffset,
-      widthSegments: Math.max(1, widthSegments)
+      widthSegments: Math.max(1, widthSegments),
+      dynamicNormals
     };
   }
 

@@ -309,7 +309,7 @@ const updateHud = (): void => {
 
   const debug = game.getDebugState();
   const perf = game.getPerformanceState();
-  debugLabel.textContent = `Playing:${debug.playing} Pending:${debug.pendingSpawns} Active:${debug.activeNotes} Progress:${(debug.progress * 100).toFixed(1)}% Q:${qualityModeSelect.value}/${perf.qualityScale.toFixed(2)} FPS:${perf.fps.toFixed(1)}`;
+  debugLabel.textContent = `Run ${debug.playing ? "playing" : "idle"} | Progress ${(debug.progress * 100).toFixed(1)}% | Active ${debug.activeNotes} | FPS ${perf.fps.toFixed(0)}`;
 
   const result = game.getResultState();
   resultPanel.classList.toggle("show", result.complete);
