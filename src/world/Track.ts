@@ -32,6 +32,8 @@ export class Track {
   private readonly totalCurveLength = this.trackLength + this.rearLength;
   private readonly lengthSegments = 180;
   private readonly trackWidth = LANE_WIDTH * (LANES + 1);
+  private readonly renderStabilization = 0.96;
+  private readonly riderStabilization = 0.62;
   private readonly worldUp = new THREE.Vector3(0, 1, 0);
   private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
   private readonly backwardAxis = new THREE.Vector3(0, 0, 1);
@@ -173,16 +175,16 @@ export class Track {
     };
   }
 
-  public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
-    this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+  public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3, stabilization = 1): THREE.Vector3 {
+    this.samplePresentationFrame(this.trackZToTime(trackZ), stabilization, this.localSample);
     out.copy(this.localSample.position)
       .addScaledVector(this.localSample.right, -laneOffset)
       .addScaledVector(this.localSample.up, heightOffset);
     return out;
   }
 
-  public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
-    this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+  public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion, stabilization = 1): THREE.Quaternion {
+    this.samplePresentationFrame(this.trackZToTime(trackZ), stabilization, this.localSample);
     out.copy(this.localSample.quaternion);
     if (roll !== 0) {
       this.tempRollQuat.setFromAxisAngle(this.localSample.tangent, roll);
@@ -191,8 +193,16 @@ export class Track {
     return out;
   }
 
+  public sampleRiderLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
+    return this.sampleLanePoint(trackZ, laneOffset, heightOffset, out, this.riderStabilization);
+  }
+
+  public sampleRiderLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
+    return this.sampleLaneQuaternion(trackZ, roll, out, this.riderStabilization);
+  }
+
   private updateVisibleTrack(): void {
-    this.sampleRelativeFrame(0, this.anchorSample);
+    this.samplePresentationFrame(0, this.renderStabilization, this.anchorSample);
     this.riderHeight = this.anchorSample.position.y;
     this.tempEuler.setFromQuaternion(this.anchorSample.quaternion, "YXZ");
     this.riderPitch = this.tempEuler.x;
@@ -209,7 +219,7 @@ export class Track {
       for (let zi = 0; zi <= this.lengthSegments; zi += 1) {
         const u = zi / this.lengthSegments;
         const trackZ = visibleRear - u * visibleLength;
-        this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+        this.samplePresentationFrame(this.trackZToTime(trackZ), this.renderStabilization, this.localSample);
 
         for (let xi = 0; xi < across; xi += 1) {
           const v = xi / surface.widthSegments;
@@ -228,9 +238,10 @@ export class Track {
     }
   }
 
-  private sampleRelativeFrame(timeSeconds: number, out: FrameSample): void {
+  private samplePresentationFrame(timeSeconds: number, stabilization: number, out: FrameSample): void {
     this.sampleGlobalFrame(this.currentTime, this.anchorSample);
     this.sampleGlobalFrame(timeSeconds, this.sampleA);
+
     const forwardFlat = this.tempVec.copy(this.anchorSample.tangent);
     forwardFlat.y = 0;
     if (forwardFlat.lengthSq() < 1e-8) {
@@ -240,12 +251,14 @@ export class Track {
     }
 
     this.yawOnlyQuat.setFromUnitVectors(this.forwardAxis, forwardFlat);
-    this.invYawOnlyQuat.copy(this.yawOnlyQuat).invert();
+    this.tempQuat.copy(this.anchorSample.quaternion).slerp(this.yawOnlyQuat, this.clamp(stabilization, 0, 1)).normalize();
+    this.invYawOnlyQuat.copy(this.tempQuat).invert();
 
     out.position.copy(this.sampleA.position).sub(this.anchorSample.position).applyQuaternion(this.invYawOnlyQuat);
     out.tangent.copy(this.sampleA.tangent).applyQuaternion(this.invYawOnlyQuat).normalize();
     out.right.copy(this.sampleA.right).applyQuaternion(this.invYawOnlyQuat).normalize();
     out.up.copy(this.sampleA.up).applyQuaternion(this.invYawOnlyQuat).normalize();
+    this.orthonormalizeFrame(out.tangent, out.right, out.up);
 
     this.tempMatrix.makeBasis(out.right, out.up, this.tempVecB.copy(out.tangent).multiplyScalar(-1));
     out.quaternion.setFromRotationMatrix(this.tempMatrix);

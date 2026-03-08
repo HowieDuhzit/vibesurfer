@@ -15,8 +15,8 @@ export class MovementSystem {
 
   public update(deltaTime: number): void {
     this.track.update(deltaTime);
-    this.track.sampleLanePoint(this.player.getZ(), this.player.getLaneOffsetX(), 0.5, this.ridePoint);
-    this.track.sampleLaneQuaternion(this.player.getZ(), 0, this.rideQuaternion);
+    this.track.sampleRiderLanePoint(this.player.getZ(), this.player.getLaneOffsetX(), 0.5, this.ridePoint);
+    this.track.sampleRiderLaneQuaternion(this.player.getZ(), 0, this.rideQuaternion);
     this.player.setRideTarget(this.ridePoint.x, this.ridePoint.y, this.ridePoint.z);
     this.player.setTrackQuaternion(this.rideQuaternion);
     this.player.update();
