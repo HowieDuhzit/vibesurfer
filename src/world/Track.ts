@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { LANE_WIDTH, LANES } from "../core/Config";
+import { TrackPlan } from "../audio/AnalysisTypes";
+import { LANE_WIDTH, LANES, TRACK_SPEED } from "../core/Config";
 import { TrackSegment } from "./TrackSegment";
 
 interface RibbonSurface {
@@ -12,6 +13,14 @@ interface RibbonSurface {
   widthSegments: number;
 }
 
+interface FrameSample {
+  position: THREE.Vector3;
+  tangent: THREE.Vector3;
+  right: THREE.Vector3;
+  up: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+}
+
 export class Track {
   public readonly group = new THREE.Group();
   public readonly segments: TrackSegment[] = [];
@@ -19,12 +28,11 @@ export class Track {
   private readonly trackLength = 240;
   private readonly rearLength = 36;
   private readonly totalCurveLength = this.trackLength + this.rearLength;
-  private readonly frontPadding = 8;
-  private readonly lengthSegments = 160;
+  private readonly lengthSegments = 180;
   private readonly trackWidth = LANE_WIDTH * (LANES + 1);
-  private readonly centerlineCurve: THREE.CatmullRomCurve3;
-  private readonly centerlinePoints: THREE.Vector3[];
   private readonly worldUp = new THREE.Vector3(0, 1, 0);
+  private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
+  private readonly backwardAxis = new THREE.Vector3(0, 0, 1);
 
   private readonly roadMaterial: THREE.MeshPhysicalMaterial;
   private readonly sideMaterial: THREE.MeshPhysicalMaterial;
@@ -34,55 +42,35 @@ export class Track {
 
   private readonly surfaces: RibbonSurface[] = [];
 
-  private readonly forwardAxis = new THREE.Vector3(0, 0, -1);
-  private readonly tempCenter = new THREE.Vector3();
-  private readonly tempTangent = new THREE.Vector3();
-  private readonly tempRight = new THREE.Vector3();
-  private readonly tempUp = new THREE.Vector3();
-  private readonly tempNormal = new THREE.Vector3();
-  private readonly tempBinormal = new THREE.Vector3();
+  private readonly sampleA: FrameSample = this.createFrameSample();
+  private readonly sampleB: FrameSample = this.createFrameSample();
+  private readonly anchorSample: FrameSample = this.createFrameSample();
+  private readonly localSample: FrameSample = this.createFrameSample();
+  private readonly yawOnlyQuat = new THREE.Quaternion();
+  private readonly invYawOnlyQuat = new THREE.Quaternion();
+  private readonly tempEuler = new THREE.Euler();
+  private readonly tempMatrix = new THREE.Matrix4();
+  private readonly tempVec = new THREE.Vector3();
+  private readonly tempVecB = new THREE.Vector3();
   private readonly tempQuat = new THREE.Quaternion();
   private readonly tempRollQuat = new THREE.Quaternion();
-  private readonly tempAxis = new THREE.Vector3();
-  private readonly tempPrevTangent = new THREE.Vector3();
-  private readonly tempRotateQuat = new THREE.Quaternion();
-  private readonly deformA = new THREE.Vector2();
-  private readonly deformB = new THREE.Vector2();
-  private readonly frameTangents: THREE.Vector3[] = [];
-  private readonly frameNormals: THREE.Vector3[] = [];
-  private readonly frameBinormals: THREE.Vector3[] = [];
 
-  private targetLift = 0;
-  private targetBank = 0;
-  private targetCurve = 0;
-  private targetPace = 0;
-  private targetForwardLean = 0;
-  private readonly motionIntensity = 0.46;
+  private readonly idlePlan = this.makeIdlePlan();
+  private activePlan: TrackPlan = this.idlePlan;
+  private planDuration = 12;
+  private currentTime = 0;
 
-  private lift = 0;
-  private bank = 0;
-  private curve = 0;
-  private pace = 0;
-  private forwardLean = 0;
-  private waveTime = 0;
+  private globalPositions: THREE.Vector3[] = [];
+  private globalTangents: THREE.Vector3[] = [];
+  private globalRights: THREE.Vector3[] = [];
+  private globalUps: THREE.Vector3[] = [];
+  private globalQuaternions: THREE.Quaternion[] = [];
 
   private riderHeight = 0;
   private riderBank = 0;
   private riderPitch = 0;
 
   public constructor() {
-    this.centerlinePoints = new Array(22);
-    for (let i = 0; i < this.centerlinePoints.length; i += 1) {
-      const u = i / (this.centerlinePoints.length - 1);
-      this.centerlinePoints[i] = new THREE.Vector3(0, 0, this.rearLength - u * this.totalCurveLength);
-    }
-    this.centerlineCurve = new THREE.CatmullRomCurve3(this.centerlinePoints, false, "centripetal", 0.5);
-    for (let i = 0; i <= this.lengthSegments; i += 1) {
-      this.frameTangents.push(new THREE.Vector3(0, 0, -1));
-      this.frameNormals.push(new THREE.Vector3(1, 0, 0));
-      this.frameBinormals.push(new THREE.Vector3(0, 1, 0));
-    }
-
     this.roadMaterial = new THREE.MeshPhysicalMaterial({
       color: 0x0b1228,
       roughness: 0.5,
@@ -114,7 +102,6 @@ export class Track {
       opacity: 0.78
     });
 
-    // Single uninterrupted mesh surfaces generated along one spline.
     this.surfaces.push(this.createRibbonSurface(this.trackWidth, 0, 0, 10, this.roadMaterial));
 
     const shoulderWidth = 1.65;
@@ -131,37 +118,28 @@ export class Track {
     this.surfaces.push(this.createRibbonSurface(0.05, glowOffset, 0.11, 1, this.glowMaterial));
     this.surfaces.push(this.createRibbonSurface(0.05, -glowOffset, 0.11, 1, this.glowMaterial));
 
-    this.refreshFrenetFrames();
-    this.updateWarpedGeometry();
+    this.setGeneratedPlan(null, this.planDuration);
   }
 
-  public update(deltaTime: number): void {
-    this.waveTime += deltaTime * (0.6 + this.pace * 1.1);
-
-    const smooth = Math.min(1, deltaTime * 4.8);
-    this.lift += (this.targetLift - this.lift) * smooth;
-    this.bank += (this.targetBank - this.bank) * smooth;
-    this.curve += (this.targetCurve - this.curve) * smooth;
-    this.pace += (this.targetPace - this.pace) * smooth;
-    this.forwardLean += (this.targetForwardLean - this.forwardLean) * smooth;
-
-    this.refreshCenterlineSpline();
-    this.refreshFrenetFrames();
-    this.updateWarpedGeometry();
-    this.updateRiderPose();
+  public setGeneratedPlan(plan: Readonly<TrackPlan> | null, duration: number): void {
+    this.activePlan = plan ? this.clonePlan(plan) : this.idlePlan;
+    this.planDuration = Math.max(1, duration);
+    this.currentTime = 0;
+    this.rebuildGlobalPath();
+    this.updateVisibleTrack();
   }
 
-  public setControlProfile(elevation: number, curvature: number, pace: number, feature: number): void {
-    const e = Math.max(0, Math.min(1, elevation));
-    const c = Math.max(-1, Math.min(1, curvature));
-    const p = Math.max(0, Math.min(1, pace));
-    const f = Math.max(0, Math.min(1, feature));
+  public setPlaybackTime(timeSeconds: number): void {
+    this.currentTime = Math.max(0, Math.min(this.planDuration, timeSeconds));
+  }
 
-    this.targetLift = (e * 3.6 + f * 1.3) * this.motionIntensity;
-    this.targetCurve = (c * (2.8 + p * 2.8 + f * 1.4)) * this.motionIntensity;
-    this.targetBank = (c * (0.14 + p * 0.22 + f * 0.1)) * this.motionIntensity;
-    this.targetPace = p;
-    this.targetForwardLean = (-0.02 - p * 0.05) * this.motionIntensity;
+  public update(_deltaTime: number): void {
+    this.updateVisibleTrack();
+  }
+
+  public setControlProfile(_elevation: number, _curvature: number, _pace: number, _feature: number): void {
+    // The track is immutable during play; runtime control data is now used for
+    // camera/effects only. Keep this method for call-site compatibility.
   }
 
   public setMusicReactiveColor(energy: number, bass: number, treble: number, fever = 0): void {
@@ -188,23 +166,176 @@ export class Track {
   }
 
   public sampleLanePoint(trackZ: number, laneOffset: number, heightOffset: number, out: THREE.Vector3): THREE.Vector3 {
-    const u = this.trackZToU(trackZ);
-    this.centerlineCurve.getPointAt(u, this.tempCenter);
-    this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
-    const worldLaneOffset = -laneOffset;
-    out.copy(this.tempCenter)
-      .addScaledVector(this.tempRight, worldLaneOffset)
-      .addScaledVector(this.tempUp, heightOffset);
+    this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+    out.copy(this.localSample.position)
+      .addScaledVector(this.localSample.right, -laneOffset)
+      .addScaledVector(this.localSample.up, heightOffset);
     return out;
   }
 
   public sampleLaneQuaternion(trackZ: number, roll: number, out: THREE.Quaternion): THREE.Quaternion {
-    const u = this.trackZToU(trackZ);
-    this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
-    out.setFromUnitVectors(this.forwardAxis, this.tempTangent);
-    this.tempRollQuat.setFromAxisAngle(this.tempTangent, roll);
-    out.multiply(this.tempRollQuat);
+    this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+    out.copy(this.localSample.quaternion);
+    if (roll !== 0) {
+      this.tempRollQuat.setFromAxisAngle(this.localSample.tangent, roll);
+      out.multiply(this.tempRollQuat);
+    }
     return out;
+  }
+
+  private updateVisibleTrack(): void {
+    this.sampleRelativeFrame(0, this.anchorSample);
+    this.riderHeight = this.anchorSample.position.y;
+    this.tempEuler.setFromQuaternion(this.anchorSample.quaternion, "YXZ");
+    this.riderPitch = this.tempEuler.x;
+    this.riderBank = this.tempEuler.z;
+
+    for (let s = 0; s < this.surfaces.length; s += 1) {
+      const surface = this.surfaces[s];
+      const across = surface.widthSegments + 1;
+      let ptr = 0;
+
+      for (let zi = 0; zi <= this.lengthSegments; zi += 1) {
+        const u = zi / this.lengthSegments;
+        const trackZ = this.rearLength - u * this.totalCurveLength;
+        this.sampleRelativeFrame(this.trackZToTime(trackZ), this.localSample);
+
+        for (let xi = 0; xi < across; xi += 1) {
+          const v = xi / surface.widthSegments;
+          const localX = (v - 0.5) * surface.width + surface.centerOffset;
+          surface.positions[ptr] = this.localSample.position.x + this.localSample.right.x * localX + this.localSample.up.x * surface.yOffset;
+          surface.positions[ptr + 1] = this.localSample.position.y + this.localSample.right.y * localX + this.localSample.up.y * surface.yOffset;
+          surface.positions[ptr + 2] = this.localSample.position.z + this.localSample.right.z * localX + this.localSample.up.z * surface.yOffset;
+          ptr += 3;
+        }
+      }
+
+      surface.geometry.attributes.position.needsUpdate = true;
+      surface.geometry.computeVertexNormals();
+    }
+  }
+
+  private sampleRelativeFrame(timeSeconds: number, out: FrameSample): void {
+    this.sampleGlobalFrame(this.currentTime, this.anchorSample);
+    this.sampleGlobalFrame(timeSeconds, this.sampleA);
+
+    const forwardFlat = this.tempVec.copy(this.anchorSample.tangent);
+    forwardFlat.y = 0;
+    if (forwardFlat.lengthSq() < 1e-8) {
+      forwardFlat.set(0, 0, -1);
+    } else {
+      forwardFlat.normalize();
+    }
+
+    this.yawOnlyQuat.setFromUnitVectors(this.forwardAxis, forwardFlat);
+    this.invYawOnlyQuat.copy(this.yawOnlyQuat).invert();
+
+    out.position.copy(this.sampleA.position).sub(this.anchorSample.position).applyQuaternion(this.invYawOnlyQuat);
+    out.tangent.copy(this.sampleA.tangent).applyQuaternion(this.invYawOnlyQuat).normalize();
+    out.right.copy(this.sampleA.right).applyQuaternion(this.invYawOnlyQuat).normalize();
+    out.up.copy(this.sampleA.up).applyQuaternion(this.invYawOnlyQuat).normalize();
+
+    this.tempMatrix.makeBasis(out.right, out.up, this.tempVecB.copy(out.tangent).multiplyScalar(-1));
+    out.quaternion.setFromRotationMatrix(this.tempMatrix);
+  }
+
+  private sampleGlobalFrame(timeSeconds: number, out: FrameSample): void {
+    const count = this.globalPositions.length;
+    if (count === 0) {
+      out.position.set(0, 0, 0);
+      out.tangent.copy(this.forwardAxis);
+      out.right.set(1, 0, 0);
+      out.up.set(0, 1, 0);
+      out.quaternion.identity();
+      return;
+    }
+
+    const normalized = this.clamp(timeSeconds / Math.max(1e-6, this.planDuration), 0, 0.999999);
+    const f = normalized * (count - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(count - 1, i0 + 1);
+    const t = f - i0;
+
+    out.position.copy(this.globalPositions[i0]).lerp(this.globalPositions[i1], t);
+    out.tangent.copy(this.globalTangents[i0]).lerp(this.globalTangents[i1], t).normalize();
+    out.right.copy(this.globalRights[i0]).lerp(this.globalRights[i1], t).normalize();
+    out.up.copy(this.globalUps[i0]).lerp(this.globalUps[i1], t).normalize();
+    out.quaternion.copy(this.globalQuaternions[i0]).slerp(this.globalQuaternions[i1], t);
+  }
+
+  private rebuildGlobalPath(): void {
+    const count = Math.max(2, this.activePlan.tilt.length);
+    this.globalPositions = new Array(count);
+    this.globalTangents = new Array(count);
+    this.globalRights = new Array(count);
+    this.globalUps = new Array(count);
+    this.globalQuaternions = new Array(count);
+
+    const dt = this.planDuration / Math.max(1, count - 1);
+    const prevTangent = new THREE.Vector3();
+    const axis = new THREE.Vector3();
+    const rotateQuat = new THREE.Quaternion();
+    const baseRight = new THREE.Vector3(1, 0, 0);
+    const baseUp = new THREE.Vector3(0, 1, 0);
+
+    for (let i = 0; i < count; i += 1) {
+      const pitch = this.activePlan.tilt[i] ?? 0;
+      const yaw = this.activePlan.pan[i] ?? 0;
+      const cp = Math.cos(pitch);
+      const tangent = new THREE.Vector3(
+        Math.sin(yaw) * cp,
+        Math.sin(pitch),
+        -Math.cos(yaw) * cp
+      ).normalize();
+      this.globalTangents[i] = tangent;
+    }
+
+    this.globalPositions[0] = new THREE.Vector3(0, 0, 0);
+    this.globalRights[0] = baseRight.clone();
+    this.globalUps[0] = baseUp.clone();
+
+    for (let i = 1; i < count; i += 1) {
+      const prevPos = this.globalPositions[i - 1];
+      const dir = this.tempVec.copy(this.globalTangents[i - 1]).lerp(this.globalTangents[i], 0.5).normalize();
+      this.globalPositions[i] = prevPos.clone().addScaledVector(dir, TRACK_SPEED * dt);
+    }
+
+    for (let i = 1; i < count; i += 1) {
+      prevTangent.copy(this.globalTangents[i - 1]);
+      axis.crossVectors(prevTangent, this.globalTangents[i]);
+      const axisLen = axis.length();
+
+      if (axisLen > 1e-8) {
+        axis.multiplyScalar(1 / axisLen);
+        const angle = Math.acos(this.clamp(prevTangent.dot(this.globalTangents[i]), -1, 1));
+        rotateQuat.setFromAxisAngle(axis, angle);
+        this.globalRights[i] = this.globalRights[i - 1].clone().applyQuaternion(rotateQuat).normalize();
+        this.globalUps[i] = this.globalUps[i - 1].clone().applyQuaternion(rotateQuat).normalize();
+      } else {
+        this.globalRights[i] = this.globalRights[i - 1].clone();
+        this.globalUps[i] = this.globalUps[i - 1].clone();
+      }
+
+      if (this.globalUps[i].dot(this.worldUp) < -0.2) {
+        this.globalRights[i].multiplyScalar(-1);
+        this.globalUps[i].multiplyScalar(-1);
+      }
+      this.globalRights[i].crossVectors(this.globalUps[i], this.globalTangents[i]).normalize();
+      this.globalUps[i].crossVectors(this.globalTangents[i], this.globalRights[i]).normalize();
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const roll = this.activePlan.roll[i] ?? 0;
+      this.tempRollQuat.setFromAxisAngle(this.globalTangents[i], roll);
+      this.globalRights[i].applyQuaternion(this.tempRollQuat).normalize();
+      this.globalUps[i].applyQuaternion(this.tempRollQuat).normalize();
+      this.tempMatrix.makeBasis(this.globalRights[i], this.globalUps[i], this.tempVec.copy(this.globalTangents[i]).multiplyScalar(-1));
+      this.globalQuaternions[i] = new THREE.Quaternion().setFromRotationMatrix(this.tempMatrix);
+    }
+  }
+
+  private trackZToTime(trackZ: number): number {
+    return this.currentTime + (-trackZ / TRACK_SPEED);
   }
 
   private createRibbonSurface(
@@ -251,178 +382,72 @@ export class Track {
     };
   }
 
-  private refreshCenterlineSpline(): void {
-    const riderU = this.trackZToU(0);
-    this.computeDeformAt(riderU, this.deformA);
-    this.computeDeformAt(Math.min(1, riderU + 0.01), this.deformB);
-    const slopeX = (this.deformB.x - this.deformA.x) / 0.01;
-    const slopeY = (this.deformB.y - this.deformA.y) / 0.01;
+  private makeIdlePlan(): TrackPlan {
+    const count = 512;
+    const tilt = new Float32Array(count);
+    const pan = new Float32Array(count);
+    const roll = new Float32Array(count);
+    const elevation = new Float32Array(count);
+    const curvature = new Float32Array(count);
+    const pace = new Float32Array(count);
+    const eventDensity = new Float32Array(count);
+    const dangerLevel = new Float32Array(count);
+    const featureEligibility = new Float32Array(count);
 
-    for (let i = 0; i < this.centerlinePoints.length; i += 1) {
-      const u = i / (this.centerlinePoints.length - 1);
-      let lateral: number;
-      let y: number;
-      if (u < riderU) {
-        const du = u - riderU;
-        // Rear extension follows the same local tangent as the player zone,
-        // instead of introducing a separate motion "section".
-        lateral = this.deformA.x + slopeX * du * 0.35;
-        y = this.deformA.y + slopeY * du * 0.35;
-      } else {
-        this.computeDeformAt(u, this.deformB);
-        lateral = this.deformB.x;
-        y = this.deformB.y;
-      }
-
-      this.centerlinePoints[i].set(lateral, y, this.rearLength + this.frontPadding - u * this.totalCurveLength);
-    }
-  }
-
-  private computeDeformAt(u: number, out: THREE.Vector2): void {
-    const damp = 0.6 + 0.4 * this.smoothstep(0.04, 1, u);
-    const phase = (u * (1.22 + this.pace * 1.5) + this.waveTime * (0.14 + this.pace * 0.12)) * Math.PI * 2;
-    const phase2 = phase * 0.7 + 0.9;
-
-    const lateralA = Math.sin(phase) * this.curve * (0.1 + damp * 0.72);
-    const lateralB = Math.sin(phase * 0.48 + 1.4) * this.curve * 0.24 * damp;
-    const lateral = lateralA + lateralB;
-
-    const baseLift = this.lift * (0.08 + damp * 0.92);
-    const hillA = Math.sin(phase2) * this.lift * 0.38 * damp;
-    const hillB = Math.sin(phase * 0.24 + 2.0) * this.lift * 0.22 * damp;
-    const drop = -Math.max(0, Math.sin(phase * 0.32 - 0.72)) * this.lift * 0.13 * damp;
-    const slope = this.forwardLean * u * this.totalCurveLength * 0.1;
-    const y = baseLift + hillA + hillB + drop + slope;
-
-    out.set(lateral, y);
-  }
-
-  private updateWarpedGeometry(): void {
-    for (let s = 0; s < this.surfaces.length; s += 1) {
-      const surface = this.surfaces[s];
-      const across = surface.widthSegments + 1;
-      let ptr = 0;
-
-      for (let zi = 0; zi <= this.lengthSegments; zi += 1) {
-        const u = zi / this.lengthSegments;
-        this.centerlineCurve.getPointAt(u, this.tempCenter);
-        this.sampleFrameAt(u, this.tempTangent, this.tempRight, this.tempUp);
-
-        const phase = (u * (1.1 + this.pace * 0.95) + this.waveTime * (0.09 + this.pace * 0.1)) * Math.PI * 2;
-        const damp = 0.52 + 0.48 * this.smoothstep(0.08, 1, u);
-        const roll = this.bank * (0.16 + damp * 0.64) + Math.sin(phase * 0.74) * this.curve * 0.025 * damp;
-        this.tempQuat.setFromAxisAngle(this.tempTangent, roll);
-        this.tempRight.applyQuaternion(this.tempQuat);
-        this.tempUp.applyQuaternion(this.tempQuat);
-
-        for (let xi = 0; xi < across; xi += 1) {
-          const v = xi / surface.widthSegments;
-          const localX = (v - 0.5) * surface.width + surface.centerOffset;
-          surface.positions[ptr] = this.tempCenter.x + this.tempRight.x * localX + this.tempUp.x * surface.yOffset;
-          surface.positions[ptr + 1] = this.tempCenter.y + this.tempRight.y * localX + this.tempUp.y * surface.yOffset;
-          surface.positions[ptr + 2] = this.tempCenter.z + this.tempRight.z * localX + this.tempUp.z * surface.yOffset;
-          ptr += 3;
-        }
-      }
-
-      surface.geometry.attributes.position.needsUpdate = true;
-      surface.geometry.computeVertexNormals();
-    }
-  }
-
-  private updateRiderPose(): void {
-    const riderU = this.trackZToU(0);
-    this.centerlineCurve.getPointAt(riderU, this.tempCenter);
-    this.sampleFrameAt(riderU, this.tempTangent, this.tempRight, this.tempUp);
-    const forwardLen = Math.max(1e-6, Math.hypot(this.tempTangent.x, this.tempTangent.z));
-    this.riderPitch = Math.atan2(this.tempTangent.y, forwardLen);
-    this.riderBank = this.bank * 0.9 + Math.sin(this.waveTime * 1.8) * this.curve * 0.02;
-    this.riderHeight = this.tempCenter.y;
-  }
-
-  private trackZToU(trackZ: number): number {
-    return Math.max(0, Math.min(1, (this.rearLength + this.frontPadding - trackZ) / this.totalCurveLength));
-  }
-
-  private sampleFrameAt(
-    u: number,
-    tangentOut: THREE.Vector3,
-    rightOut: THREE.Vector3,
-    upOut: THREE.Vector3
-  ): void {
-    const f = Math.max(0, Math.min(this.lengthSegments, u * this.lengthSegments));
-    const i0 = Math.floor(f);
-    const i1 = Math.min(this.lengthSegments, i0 + 1);
-    const t = f - i0;
-
-    tangentOut.copy(this.frameTangents[i0]).lerp(this.frameTangents[i1], t).normalize();
-    this.tempNormal.copy(this.frameNormals[i0]).lerp(this.frameNormals[i1], t).normalize();
-    this.tempBinormal.copy(this.frameBinormals[i0]).lerp(this.frameBinormals[i1], t).normalize();
-
-    // Keep the road upright for readability; prevents occasional side flips.
-    if (this.tempBinormal.dot(this.worldUp) < 0) {
-      this.tempNormal.multiplyScalar(-1);
-      this.tempBinormal.multiplyScalar(-1);
+    for (let i = 0; i < count; i += 1) {
+      const u = i / Math.max(1, count - 1);
+      tilt[i] = Math.sin(u * Math.PI * 2) * 0.06;
+      pan[i] = Math.sin(u * Math.PI * 1.4) * 0.08;
+      roll[i] = Math.sin(u * Math.PI * 2.4) * 0.05;
+      elevation[i] = 0.2;
+      curvature[i] = pan[i];
+      pace[i] = 0.25;
+      eventDensity[i] = 0.2;
+      dangerLevel[i] = 0.2;
+      featureEligibility[i] = 0.1;
     }
 
-    rightOut.copy(this.tempNormal);
-    upOut.copy(this.tempBinormal);
+    return {
+      tilt,
+      pan,
+      roll,
+      elevation,
+      curvature,
+      pace,
+      eventDensity,
+      dangerLevel,
+      featureEligibility,
+      anchorFrames: []
+    };
   }
 
-  private refreshFrenetFrames(): void {
-    // Rotation-minimizing frames (parallel transport) are more stable than raw
-    // Frenet frames for dynamic curves and prevent random 180-degree flips.
-    this.centerlineCurve.getTangentAt(0, this.frameTangents[0]).normalize();
-
-    this.frameBinormals[0]
-      .copy(this.worldUp)
-      .addScaledVector(this.frameTangents[0], -this.worldUp.dot(this.frameTangents[0]));
-    if (this.frameBinormals[0].lengthSq() < 1e-8) {
-      this.frameBinormals[0].set(0, 0, 1).addScaledVector(
-        this.frameTangents[0],
-        -this.frameTangents[0].z
-      );
-    }
-    this.frameBinormals[0].normalize();
-    this.frameNormals[0].crossVectors(this.frameBinormals[0], this.frameTangents[0]).normalize();
-
-    for (let i = 1; i <= this.lengthSegments; i += 1) {
-      const u = i / this.lengthSegments;
-      this.centerlineCurve.getTangentAt(Math.min(0.9999, u), this.frameTangents[i]).normalize();
-
-      this.tempPrevTangent.copy(this.frameTangents[i - 1]);
-      this.tempAxis.crossVectors(this.tempPrevTangent, this.frameTangents[i]);
-      const axisLen = this.tempAxis.length();
-
-      if (axisLen > 1e-8) {
-        this.tempAxis.multiplyScalar(1 / axisLen);
-        const dot = THREE.MathUtils.clamp(this.tempPrevTangent.dot(this.frameTangents[i]), -1, 1);
-        const angle = Math.acos(dot);
-        this.tempRotateQuat.setFromAxisAngle(this.tempAxis, angle);
-        this.frameNormals[i].copy(this.frameNormals[i - 1]).applyQuaternion(this.tempRotateQuat).normalize();
-        this.frameBinormals[i].copy(this.frameBinormals[i - 1]).applyQuaternion(this.tempRotateQuat).normalize();
-      } else {
-        this.frameNormals[i].copy(this.frameNormals[i - 1]);
-        this.frameBinormals[i].copy(this.frameBinormals[i - 1]);
-      }
-
-      // Keep the frame upright and right-handed.
-      if (this.frameBinormals[i].dot(this.worldUp) < 0) {
-        this.frameBinormals[i].multiplyScalar(-1);
-        this.frameNormals[i].multiplyScalar(-1);
-      }
-      this.frameNormals[i]
-        .crossVectors(this.frameBinormals[i], this.frameTangents[i])
-        .normalize();
-      this.frameBinormals[i]
-        .crossVectors(this.frameTangents[i], this.frameNormals[i])
-        .normalize();
-    }
+  private clonePlan(plan: Readonly<TrackPlan>): TrackPlan {
+    return {
+      tilt: new Float32Array(plan.tilt),
+      pan: new Float32Array(plan.pan),
+      roll: new Float32Array(plan.roll),
+      elevation: new Float32Array(plan.elevation),
+      curvature: new Float32Array(plan.curvature),
+      pace: new Float32Array(plan.pace),
+      eventDensity: new Float32Array(plan.eventDensity),
+      dangerLevel: new Float32Array(plan.dangerLevel),
+      featureEligibility: new Float32Array(plan.featureEligibility),
+      anchorFrames: plan.anchorFrames.slice()
+    };
   }
 
-  private smoothstep(edge0: number, edge1: number, x: number): number {
-    const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(1e-6, edge1 - edge0)));
-    return t * t * (3 - 2 * t);
+  private createFrameSample(): FrameSample {
+    return {
+      position: new THREE.Vector3(),
+      tangent: new THREE.Vector3(0, 0, -1),
+      right: new THREE.Vector3(1, 0, 0),
+      up: new THREE.Vector3(0, 1, 0),
+      quaternion: new THREE.Quaternion()
+    };
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, value));
   }
 
   private makeRoadTexture(): THREE.CanvasTexture {

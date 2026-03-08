@@ -532,6 +532,7 @@ export class Game {
 
   private regenerateBeatMap(): void {
     if (this.gameMode === "endless") {
+      this.track.setGeneratedPlan(null, 12);
       return;
     }
 
@@ -543,6 +544,7 @@ export class Game {
     this.beatMapGenerator.clear();
     this.spawner.reset();
     this.beatMapGenerator.generateFromAudioBuffer(buffer);
+    this.track.setGeneratedPlan(this.beatMapGenerator.getTrackPlan(), buffer.duration);
   }
 
   private onNoteCollected(x: number, y: number, z: number, lane: number, judgment: HitJudgment): void {
@@ -619,7 +621,7 @@ export class Game {
       this.spawner.updateSpawnEvents(this.pendingSpawnEvents);
 
       const control = this.beatMapGenerator.sampleRuntimeControl(audioTime);
-      this.track.setControlProfile(control.elevation, control.curvature, control.pace, control.feature);
+      this.track.setPlaybackTime(audioTime);
       this.cameraController.setTrackMotion(control.curvature, control.elevation, control.pace);
 
       this.movementSystem.update(time.deltaTime);
@@ -644,7 +646,7 @@ export class Game {
       this.musicVisualizerBackground.update(time.deltaTime, 0, 0, 0);
       this.playerTrailEffect.update(time.deltaTime, this.player.position.x, 0.08, 0.06, 0);
       this.updatePlayerHoverVisual(time.deltaTime, 0.08, 0.06);
-      this.track.setControlProfile(0, 0, 0, 0);
+      this.track.setPlaybackTime(0);
       this.cameraController.setTrackMotion(0, 0, 0);
       this.movementSystem.update(time.deltaTime);
       this.particleSystem.update(time.deltaTime);

@@ -44,6 +44,9 @@ export interface StructureAnalysis {
 }
 
 export interface TrackPlan {
+  tilt: Float32Array;
+  pan: Float32Array;
+  roll: Float32Array;
   elevation: Float32Array;
   curvature: Float32Array;
   pace: Float32Array;

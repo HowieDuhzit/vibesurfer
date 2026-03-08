@@ -230,6 +230,10 @@ export class BeatMapGenerator {
     return this.lastGenerated;
   }
 
+  public getTrackPlan(): Readonly<TrackPlan> | null {
+    return this.activeTrack;
+  }
+
   public getDebugData(): Readonly<GeneratorDebugData> {
     return this.debugData;
   }
